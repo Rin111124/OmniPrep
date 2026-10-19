@@ -1,4 +1,4 @@
-﻿-- Persist in-progress answers separately from submitted grading history.
+-- Persist in-progress answers separately from submitted grading history.
 CREATE TABLE IF NOT EXISTS attempt_answers (
     attempt_id UUID NOT NULL REFERENCES exam_attempts(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,

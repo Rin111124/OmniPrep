@@ -1,4 +1,4 @@
-﻿-- Apply with all ingestion workers stopped to avoid overlapping lease versions.
+-- Apply with all ingestion workers stopped to avoid overlapping lease versions.
 ALTER TABLE exam_papers
     ADD COLUMN IF NOT EXISTS processing_attempts SMALLINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ,

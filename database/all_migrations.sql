@@ -1318,7 +1318,7 @@ $$;
 --- MIGRATION: 006_attempt_answer_autosave.sql
 --- ============================================================
 
-﻿-- Persist in-progress answers separately from submitted grading history.
+-- Persist in-progress answers separately from submitted grading history.
 CREATE TABLE IF NOT EXISTS attempt_answers (
     attempt_id UUID NOT NULL REFERENCES exam_attempts(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -1343,7 +1343,7 @@ CREATE POLICY attempt_answers_self ON attempt_answers
 --- MIGRATION: 007_ingestion_leases.sql
 --- ============================================================
 
-﻿-- Apply with all ingestion workers stopped to avoid overlapping lease versions.
+-- Apply with all ingestion workers stopped to avoid overlapping lease versions.
 ALTER TABLE exam_papers
     ADD COLUMN IF NOT EXISTS processing_attempts SMALLINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ,
