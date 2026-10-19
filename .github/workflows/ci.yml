@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore .NET solution
+        run: dotnet restore OmniPrep.slnx
+
+      - name: Audit NuGet vulnerabilities
+        shell: bash
+        run: |
+          dotnet package list --project OmniPrep.slnx --include-transitive --vulnerable --format json > nuget-vulnerabilities.json
+          cat nuget-vulnerabilities.json
+          if jq -e '[.. | objects | .severity? | strings | ascii_downcase | select(. == "high" or . == "critical")] | length > 0' nuget-vulnerabilities.json >/dev/null; then
+            echo "High or critical NuGet vulnerability found."
+            exit 1
+          fi
+
+      - name: Build .NET solution
+        run: dotnet build OmniPrep.slnx --configuration Release --no-restore
+
+      - name: Run .NET tests
+        run: dotnet test OmniPrep.slnx --configuration Release --no-build
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Audit runtime npm vulnerabilities
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint -- --max-warnings=0
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          OMNIPREP_API_URL: http://127.0.0.1:5000/api
+        run: npm run build

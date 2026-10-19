@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OmniPrep.Api/OmniPrep.Api.csproj" />
+    <Project Path="src/OmniPrep.Application/OmniPrep.Application.csproj" />
+    <Project Path="src/OmniPrep.Domain/OmniPrep.Domain.csproj" />
+    <Project Path="src/OmniPrep.Infrastructure/OmniPrep.Infrastructure.csproj" />
+    <Project Path="src/OmniPrep.Worker/OmniPrep.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OmniPrep.Tests/OmniPrep.Tests.csproj" />
+  </Folder>
+</Solution>

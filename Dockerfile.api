@@ -1,0 +1,31 @@
+# ============================================================
+# Dockerfile cho OmniPrep.Api (.NET 10 Web API)
+# ============================================================
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /app
+
+# Copy các file dự án để cache restore
+COPY OmniPrep.slnx ./
+COPY src/OmniPrep.Domain/OmniPrep.Domain.csproj src/OmniPrep.Domain/
+COPY src/OmniPrep.Application/OmniPrep.Application.csproj src/OmniPrep.Application/
+COPY src/OmniPrep.Infrastructure/OmniPrep.Infrastructure.csproj src/OmniPrep.Infrastructure/
+COPY src/OmniPrep.Api/OmniPrep.Api.csproj src/OmniPrep.Api/
+COPY src/OmniPrep.Worker/OmniPrep.Worker.csproj src/OmniPrep.Worker/
+COPY tests/OmniPrep.Tests/OmniPrep.Tests.csproj tests/OmniPrep.Tests/
+
+RUN dotnet restore src/OmniPrep.Api/OmniPrep.Api.csproj
+
+# Copy toàn bộ mã nguồn và build Release
+COPY src/ src/
+RUN dotnet publish src/OmniPrep.Api/OmniPrep.Api.csproj -c Release -o /out --no-restore
+
+# Runtime image siêu nhẹ
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /out ./
+
+# Mặc định lắng nghe port 8080 (chuẩn Cloud Run, Render, Container)
+ENV ASPNETCORE_HTTP_PORTS=8080
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "OmniPrep.Api.dll"]

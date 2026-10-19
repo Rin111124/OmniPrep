@@ -1,0 +1,24 @@
+# ============================================================
+# Dockerfile cho OmniPrep.Worker (Background Ingestion Worker)
+# ============================================================
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /app
+
+COPY OmniPrep.slnx ./
+COPY src/OmniPrep.Domain/OmniPrep.Domain.csproj src/OmniPrep.Domain/
+COPY src/OmniPrep.Application/OmniPrep.Application.csproj src/OmniPrep.Application/
+COPY src/OmniPrep.Infrastructure/OmniPrep.Infrastructure.csproj src/OmniPrep.Infrastructure/
+COPY src/OmniPrep.Api/OmniPrep.Api.csproj src/OmniPrep.Api/
+COPY src/OmniPrep.Worker/OmniPrep.Worker.csproj src/OmniPrep.Worker/
+COPY tests/OmniPrep.Tests/OmniPrep.Tests.csproj tests/OmniPrep.Tests/
+
+RUN dotnet restore src/OmniPrep.Worker/OmniPrep.Worker.csproj
+
+COPY src/ src/
+RUN dotnet publish src/OmniPrep.Worker/OmniPrep.Worker.csproj -c Release -o /out --no-restore
+
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /out ./
+
+ENTRYPOINT ["dotnet", "OmniPrep.Worker.dll"]

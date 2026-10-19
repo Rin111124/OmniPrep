@@ -1,0 +1,232 @@
+{
+  "pipelineMetadata": {
+    "moduleName": "Module 1 - Automated Ingestion & Scraping Pipeline",
+    "version": "2.5.0-GDPT2018",
+    "pipelineArchitecture": "5-Station Automated Processing Engine",
+    "executionSchedule": "Daily 02:00 AM (GitHub Actions Cron / Background Worker)",
+    "lastExecuted": "2026-10-19T02:14:38.204Z",
+    "totalExecutionDurationMs": 28450,
+    "environment": "Production / Staging",
+    "stations": [
+      { "id": 1, "name": "Trạm 1: ScraperService", "purpose": "Thu thập đề thi mới từ các cổng học liệu mở & scratch/incoming_papers/" },
+      { "id": 2, "name": "Trạm 2: FileHashFilter", "purpose": "Băm SHA-256 toàn bộ file để loại bỏ đề trùng lặp ngay từ đầu trong O(1)" },
+      { "id": 3, "name": "Trạm 3: GeminiParserService", "purpose": "Gemini 2.0 Flash bóc tách văn bản thành JSON chuẩn cấu trúc 3 phần GDPT 2018" },
+      { "id": 4, "name": "Trạm 4: DeduplicationService", "purpose": "Lọc trùng 2 tầng: SHA-256 exact match + pgvector Cosine Distance < 0.08" },
+      { "id": 5, "name": "Trạm 5: Mutation & Storage Engine", "purpose": "Lưu câu hỏi gốc vào Supabase PostgreSQL + Sinh 2-3 câu hỏi biến thể AI" }
+    ],
+    "summaryCounters": {
+      "scrapedFiles": 4,
+      "processedFiles": 4,
+      "totalExtractedQuestions": 154,
+      "newUniqueQuestions": 82,
+      "blockedByVectorDistance": 46,
+      "blockedBySha256": 26,
+      "aiMutationVariantsGenerated": 164,
+      "averageCosineDistanceNew": 0.312,
+      "averageCosineDistanceDuplicate": 0.039,
+      "operatingCostUsd": 0.00
+    }
+  },
+  "processedExamPapers": [
+    {
+      "paperId": "paper-geo-bacninh-2026",
+      "fileName": "De_Thi_Thu_So_Bac_Ninh_Lan1_2026.pdf",
+      "subject": "Địa lý",
+      "subjectCode": "GEO",
+      "examYear": 2026,
+      "sourceName": "Sở GD&ĐT Bắc Ninh 2026",
+      "scrapedAt": "2026-10-19T02:00:15Z",
+      "fileHashSha256": "4b68e7d23a105284bf561ef350c379201f8d2279b9d6288647acae4e6015b3c8",
+      "fileStatus": "Completed",
+      "stats": {
+        "extracted": 40,
+        "newCount": 22,
+        "mergedPgvector": 12,
+        "mergedSha256": 6,
+        "mutationVariantsCount": 44
+      },
+      "pipelineExecutionLog": [
+        { "station": 1, "status": "Success", "message": "Quét cổng học liệu Sở GD&ĐT Bắc Ninh, tải về file PDF 1.8MB." },
+        { "station": 2, "status": "Success", "message": "SHA-256 4b68e7d2... chưa từng tồn tại trong exam_papers. Chuyển tiếp Trạm 3." },
+        { "station": 3, "status": "Success", "message": "Gemini 2.0 Flash trích xuất thành công 40/40 câu (18 Part I, 4 Part II, 6 Part III)." },
+        { "station": 4, "status": "Success", "message": "Dedup 2 tầng: 6 câu trùng SHA-256 100%, 12 câu Cosine < 0.08 -> Hợp nhất source_tags. 22 câu mới." },
+        { "station": 5, "status": "Success", "message": "Đã ghi 22 câu mới vào DB và kích hoạt Mutation sinh 44 câu biến thể đảo giả thiết." }
+      ]
+    },
+    {
+      "paperId": "paper-gdktpl-lamson-2026",
+      "fileName": "Chuyen_Lam_Son_GDKTPL_KhaoSat_2026.docx",
+      "subject": "Giáo dục Kinh tế và Pháp luật",
+      "subjectCode": "GDKTPL",
+      "examYear": 2026,
+      "sourceName": "THPT Chuyên Lam Sơn Thanh Hóa",
+      "scrapedAt": "2026-10-19T02:18:22Z",
+      "fileHashSha256": "8f1a23e590bc331d279cf0214ef5a2b71900d8327c5bb02e8612ca493011a09d",
+      "fileStatus": "Completed",
+      "stats": {
+        "extracted": 40,
+        "newCount": 25,
+        "mergedPgvector": 11,
+        "mergedSha256": 4,
+        "mutationVariantsCount": 50
+      },
+      "pipelineExecutionLog": [
+        { "station": 1, "status": "Success", "message": "Thu thập đề khảo sát chất lượng từ THPT Chuyên Lam Sơn." },
+        { "station": 2, "status": "Success", "message": "FileHash 8f1a23e5... hợp lệ. Chưa xử lý." },
+        { "station": 3, "status": "Success", "message": "Gemini bóc tách 40 câu hỏi chuyên đề Kinh tế thị trường, Lạm phát, Pháp luật." },
+        { "station": 4, "status": "Success", "message": "4 câu trùng SHA-256, 11 câu Cosine < 0.076. 25 câu mới hoàn toàn." },
+        { "station": 5, "status": "Success", "message": "Lưu 25 câu gốc và sinh 50 biến thể xử lý tình huống pháp lý mới." }
+      ]
+    }
+  ],
+  "sampleExtractedQuestions": [
+    {
+      "questionId": "00000000-0000-0000-0001-000000000001",
+      "part": "PHẦN I: TRẮC NGHIỆM 4 LỰA CHỌN (0.25 điểm/câu)",
+      "format": "MULTIPLE_CHOICE",
+      "topic": "Địa lý tự nhiên Việt Nam",
+      "difficulty": "NHAN_BIET",
+      "content": "Vị trí địa lý nước ta nằm trọn trong vùng nội chí tuyến bán cầu Bắc nên khí hậu có đặc điểm nổi bật nào sau đây?",
+      "options": {
+        "A": "Có tổng bức xạ lớn và cân bằng bức xạ quanh năm luôn dương.",
+        "B": "Chịu ảnh hưởng sâu sắc của các khối khí biển mang tính ẩm.",
+        "C": "Có hai mùa mưa và khô phân hóa sâu sắc trên cả nước.",
+        "D": "Lượng mưa lớn và phân bố đều ở khắp tất cả các vùng."
+      },
+      "correctOption": "A",
+      "explanation": "Vị trí nội chí tuyến quy định tính chất nhiệt đới: góc nhập xạ lớn quanh năm, hai lần Mặt Trời lên thiên đỉnh, tổng lượng bức xạ lớn và cán cân bức xạ luôn dương.",
+      "distractorAnalysis": {
+        "B": "⚠️ Bẫy tính chất hải dương - do giáp biển Đông chứ không phải do vị trí nội chí tuyến quy định.",
+        "C": "⚠️ Bẫy khí hậu cận xích đạo hoặc gió mùa - không phản ánh bản chất trực tiếp của góc nhập xạ nội chí tuyến.",
+        "D": "⚠️ Sai vì lượng mưa phân bố không đều (mưa nhiều sườn đón gió, mưa ít nơi khuất gió)."
+      },
+      "deduplicationRecord": {
+        "station4_sha256Hash": "b7399a0ef2a5482e79603214829fa756182cba190b3f5c71b7fcf71aa641fa90",
+        "station4_nearestVectorDistance": 0.032,
+        "station4_decision": "MERGE_SOURCE_TAGS (Trùng ngữ nghĩa với Đề Bộ GD&ĐT)",
+        "sourceTags": ["Đề Tham khảo Bộ GD&ĐT 2025", "Sở Bắc Ninh 2026", "Sở Hà Nội 2025"],
+        "occurrenceCount": 3
+      },
+      "station5_mutationVariants": [
+        {
+          "variantId": "var-geo-01-a",
+          "technique": "Nghịch đảo giả thiết (Inverse Hypothesis)",
+          "content": "Đặc điểm nào sau đây của bức xạ và góc chiếu sáng là bằng chứng trực tiếp chứng minh nước ta nằm trọn trong vùng nội chí tuyến bán cầu Bắc?",
+          "options": {
+            "A": "Hằng năm có hai lần Mặt Trời lên thiên đỉnh và góc nhập xạ luôn lớn.",
+            "B": "Quanh năm chịu tác động của gió mùa Tây Nam nóng ẩm.",
+            "C": "Có dải hội tụ nhiệt đới di chuyển dọc theo chiều dài đất nước.",
+            "D": "Sự luân phiên hoạt động giữa gió mùa mùa đông và gió mùa mùa hạ."
+          },
+          "correctOption": "A",
+          "explanation": "Hiện tượng Mặt Trời lên thiên đỉnh 2 lần trong năm và góc chiếu sáng lớn là hệ quả trực tiếp của vị trí nội chí tuyến."
+        },
+        {
+          "variantId": "var-geo-01-b",
+          "technique": "Mở rộng bối cảnh (Context Variation)",
+          "content": "Khác với các nước cùng vĩ độ ở khu vực Bắc Phi hay Tây Á thường khô hạn và hình thành hoang mạc, thiên nhiên nước ta bốn mùa xanh tươi chủ yếu nhờ:",
+          "options": {
+            "A": "Vị trí tiếp giáp Biển Đông rộng lớn kết hợp hoạt động của gió mùa.",
+            "B": "Nằm trọn trong vùng nội chí tuyến có góc nhập xạ lớn quanh năm.",
+            "C": "Địa hình chủ yếu là đồi núi thấp chạy theo hướng tây bắc - đông nam.",
+            "D": "Sự xuất hiện của nhiều hệ thống sông lớn bồi tụ phù sa."
+          },
+          "correctOption": "A",
+          "explanation": "Nhờ Biển Đông cung cấp nguồn ẩm dồi dào và tác động của các hoàn lưu gió mùa nên nước ta tránh được tình trạng khô hạn như hoang mạc Sahara."
+        }
+      ]
+    },
+    {
+      "questionId": "00000000-0000-0000-0001-000000000007",
+      "part": "PHẦN II: TRẮC NGHIỆM ĐÚNG / SAI 4 Ý (Điểm lũy tiến: 0.1, 0.25, 0.5, 1.0)",
+      "format": "TRUE_FALSE",
+      "topic": "Địa lý các ngành kinh tế",
+      "difficulty": "VAN_DUNG",
+      "content": "Cho bảng số liệu: Diện tích và sản lượng lúa của nước ta giai đoạn 2018 - 2023. Mỗi ý a), b), c), d) học sinh chọn Đúng hoặc Sai.",
+      "attachedTable": "| Năm | Diện tích gieo trồng (nghìn ha) | Sản lượng lúa (nghìn tấn) |\n| :--- | :--- | :--- |\n| 2018 | 7570.4 | 44046.0 |\n| 2020 | 7279.0 | 42758.8 |\n| 2022 | 7106.6 | 42680.1 |\n| 2023 | 7122.5 | 43478.2 |",
+      "statements": [
+        {
+          "id": "a",
+          "text": "Diện tích gieo trồng lúa của nước ta giai đoạn 2018 - 2023 có xu hướng giảm liên tục qua các năm khảo sát.",
+          "isCorrect": false,
+          "trapWarning": "Bẫy từ ngữ 'liên tục': Năm 2023 đạt 7122.5 nghìn ha, tăng 15.9 nghìn ha so với năm 2022 -> Mệnh đề SAI."
+        },
+        {
+          "id": "b",
+          "text": "Năng suất lúa năm 2023 của nước ta đạt trên 61.0 tạ/ha.",
+          "isCorrect": true,
+          "trapWarning": "Công thức: Năng suất = Sản lượng / Diện tích = (43478.2 * 1000) / 7122.5 = 61.04 tạ/ha > 61.0 tạ/ha -> ĐÚNG."
+        },
+        {
+          "id": "c",
+          "text": "Sản lượng lúa năm 2023 tăng chủ yếu do việc mở rộng ồ ạt diện tích canh tác trên toàn quốc.",
+          "isCorrect": false,
+          "trapWarning": "Bẫy tư duy: Sản lượng tăng do thâm canh nâng cao năng suất (giống mới, kỹ thuật), diện tích nhìn chung giảm mạnh so với 2018 -> SAI."
+        },
+        {
+          "id": "d",
+          "text": "Xu hướng giảm diện tích lúa thời gian qua chủ yếu do chuyển đổi cơ cấu cây trồng, nuôi trồng thủy sản và đô thị hóa.",
+          "isCorrect": true,
+          "trapWarning": "Đúng chủ trương tái cơ cấu nông nghiệp: chuyển diện tích lúa kém hiệu quả sang cây ăn quả, thủy sản và đất khu công nghiệp/đô thị."
+        }
+      ],
+      "explanation": "Đánh giá chi tiết từng mệnh đề: a) Sai vì năm 2023 diện tích tăng nhẹ; b) Đúng vì năng suất đạt 61.04 tạ/ha; c) Sai vì sản lượng tăng nhờ thâm canh tăng vụ và khoa học kỹ thuật; d) Đúng theo xu thế chuyển dịch cơ cấu nông nghiệp.",
+      "deduplicationRecord": {
+        "station4_sha256Hash": "f128ca7b901249e0a12e84120384bcda981048b299e1208ca7718e001239aafe",
+        "station4_nearestVectorDistance": 0.285,
+        "station4_decision": "INSERT_NEW_QUESTION (Câu hỏi mới hoàn toàn)",
+        "sourceTags": ["Sở Bắc Ninh 2026 - Lần 1"],
+        "occurrenceCount": 1
+      },
+      "station5_mutationVariants": [
+        {
+          "variantId": "var-geo-07-mutated",
+          "technique": "Cập nhật số liệu chu kỳ mới (Data Shift Variant)",
+          "content": "Cho bảng số liệu: Diện tích và sản lượng ngô nước ta giai đoạn 2019 - 2024. Đánh giá tính đúng/sai của các nhận định.",
+          "attachedTable": "| Năm | Diện tích gieo trồng (nghìn ha) | Sản lượng ngô (nghìn tấn) |\n| :--- | :--- | :--- |\n| 2019 | 915.2 | 4728.5 |\n| 2021 | 884.0 | 4410.2 |\n| 2023 | 860.5 | 4402.1 |\n| 2024 | 868.0 | 4513.6 |"
+        }
+      ]
+    },
+    {
+      "questionId": "00000000-0000-0000-0001-000000000009",
+      "part": "PHẦN III: TRẢ LỜI NGẮN SỐ HỌC (0.25 điểm/câu)",
+      "format": "SHORT_ANSWER",
+      "topic": "Địa lý các ngành kinh tế",
+      "difficulty": "VAN_DUNG_CAO",
+      "content": "Cho bảng số liệu sau: Khối lượng vận chuyển hàng hóa phân theo ngành vận tải nước ta năm 2020 và 2023 (đơn vị: triệu tấn). Tính tốc độ tăng trưởng khối lượng vận chuyển hàng hóa bằng đường biển năm 2023 so với năm 2020 (lấy năm 2020 = 100%, làm tròn kết quả đến 1 chữ số thập phân, đơn vị %).",
+      "attachedTable": "| Ngành vận tải | Năm 2020 | Năm 2023 |\n| :--- | :--- | :--- |\n| Đường bộ | 1345.2 | 1792.8 |\n| Đường sắt | 4.8 | 4.6 |\n| Đường biển | 84.5 | 114.2 |\n| Đường sông | 285.4 | 390.6 |",
+      "answerData": {
+        "correctNumber": 135.1,
+        "tolerance": 0.15,
+        "unit": "%",
+        "rounding": "1 chữ số thập phân"
+      },
+      "explanation": "Áp dụng công thức tính tốc độ tăng trưởng:\nTốc độ tăng trưởng = (Khối lượng năm 2023 / Khối lượng năm 2020) * 100\n= (114.2 / 84.5) * 100 = 135.1479...%\nLàm tròn đến một chữ số thập phân ta được kết quả: 135.1%.",
+      "distractorAnalysis": {
+        "shortAnswerWrongTraps": {
+          "35.1": "⚠️ Nhầm sang tính 'Mức gia tăng tốc độ' (135.1 - 100 = 35.1%) thay vì Tốc độ tăng trưởng lấy mốc 100%.",
+          "29.7": "⚠️ Nhầm sang lấy hiệu số tuyệt đối (114.2 - 84.5 = 29.7 triệu tấn) thay vì tính tốc độ phần trăm.",
+          "135": "⚠️ Quên quy tắc làm tròn đến 1 chữ số thập phân theo yêu cầu của Bộ GD&ĐT (thiếu .1)."
+        }
+      },
+      "deduplicationRecord": {
+        "station4_sha256Hash": "cc1928374aae9102938475618293041928475619203847561928374651928374",
+        "station4_nearestVectorDistance": 0.342,
+        "station4_decision": "INSERT_NEW_QUESTION (Câu hỏi tính toán thực tế độc lập)",
+        "sourceTags": ["Sở Bắc Ninh 2026 - Lần 1"],
+        "occurrenceCount": 1
+      },
+      "station5_mutationVariants": [
+        {
+          "variantId": "var-geo-09-mutated",
+          "technique": "Thay đổi đối tượng tính toán (Sector Variation)",
+          "content": "Cho bảng số liệu trên: Tính tốc độ tăng trưởng khối lượng vận chuyển hàng hóa bằng đường sông năm 2023 so với năm 2020 (lấy năm 2020 = 100%, làm tròn kết quả đến 1 chữ số thập phân, đơn vị %).",
+          "answerData": {
+            "correctNumber": 136.9,
+            "formula": "(390.6 / 285.4) * 100 = 136.86% -> 136.9%"
+          }
+        }
+      ]
+    }
+  ]
+}
