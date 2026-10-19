@@ -124,6 +124,7 @@ app.MapGroup("/api")
    .MapIngestionApi()
    .MapQuestionModerationApi()
    .MapUsersApi()
-   .MapMistakesApi();
+   .MapMistakesApi()
+   .MapExamSourcesApi();
 
 app.Run();
