@@ -1,0 +1,47 @@
+# Render Blueprint for the API and always-on ingestion worker.
+# Both services use paid 0.5 CPU / 512 MB plans; review current pricing before syncing.
+services:
+  - type: web
+    name: omniprep-api-rin111124
+    runtime: docker
+    plan: 0.5c-512mb
+    region: singapore
+    branch: main
+    autoDeployTrigger: checksPass
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /api/health/ready
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_HTTP_PORTS
+        value: "8080"
+      - key: PORT
+        value: "8080"
+      - key: ConnectionStrings__Supabase
+        sync: false
+      - key: Supabase__Url
+        sync: false
+      - key: Gemini__ApiKey
+        sync: false
+      - key: Cors__AllowedOrigins
+        sync: false
+      - key: Frontend__Url
+        sync: false
+
+  - type: worker
+    name: omniprep-worker-rin111124
+    runtime: docker
+    plan: 0.5c-512mb
+    region: singapore
+    branch: main
+    autoDeployTrigger: checksPass
+    dockerfilePath: ./Dockerfile.worker
+    dockerContext: .
+    envVars:
+      - key: DOTNET_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__Supabase
+        sync: false
+      - key: Gemini__ApiKey
+        sync: false
