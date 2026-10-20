@@ -10,7 +10,7 @@ services:
     autoDeployTrigger: checksPass
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
-    healthCheckPath: /api/health/ready
+    healthCheckPath: /api/health/live
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
