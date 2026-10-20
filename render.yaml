@@ -1,10 +1,10 @@
-# Render Blueprint for the API and always-on ingestion worker.
-# Both services use paid 0.5 CPU / 512 MB plans; review current pricing before syncing.
+# Free demo deployment: API only. Render does not offer a free background worker.
+# The ingestion worker is intentionally not declared here to avoid creating a paid service.
 services:
   - type: web
-    name: omniprep-api-rin111124
+    name: omniprep-api
     runtime: docker
-    plan: 0.5c-512mb
+    plan: free
     region: singapore
     branch: main
     autoDeployTrigger: checksPass
@@ -27,21 +27,4 @@ services:
       - key: Cors__AllowedOrigins
         sync: false
       - key: Frontend__Url
-        sync: false
-
-  - type: worker
-    name: omniprep-worker-rin111124
-    runtime: docker
-    plan: 0.5c-512mb
-    region: singapore
-    branch: main
-    autoDeployTrigger: checksPass
-    dockerfilePath: ./Dockerfile.worker
-    dockerContext: .
-    envVars:
-      - key: DOTNET_ENVIRONMENT
-        value: Production
-      - key: ConnectionStrings__Supabase
-        sync: false
-      - key: Gemini__ApiKey
         sync: false
