@@ -119,7 +119,7 @@ COMMENT ON TABLE subjects IS 'Cấu hình môn học và ma trận đề thi chu
 -- ============================================================
 CREATE TABLE IF NOT EXISTS questions (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    subject_id          UUID NOT NULL REFERENCES subjects(id),
+    subject_id          UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
 
     -- Nội dung câu hỏi (Markdown, hỗ trợ LaTeX)
     content             TEXT NOT NULL,
@@ -173,14 +173,14 @@ COMMENT ON COLUMN questions.content_embedding IS 'Vector 768 chiều từ text-e
 ALTER TABLE questions ALTER COLUMN content_hash SET DEFAULT '';
 
 CREATE OR REPLACE FUNCTION set_question_content_hash()
-RETURNS TRIGGER AS 
+RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.content_hash IS NULL OR LENGTH(TRIM(NEW.content_hash)) = 0 THEN
         NEW.content_hash := encode(sha256(NEW.content::bytea), 'hex');
     END IF;
     RETURN NEW;
 END;
- LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_set_question_content_hash ON questions;
 CREATE TRIGGER trg_set_question_content_hash
@@ -194,7 +194,7 @@ EXECUTE FUNCTION set_question_content_hash();
 CREATE TABLE IF NOT EXISTS exam_papers (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     source_id       UUID NOT NULL REFERENCES exam_sources(id),
-    subject_id      UUID NOT NULL REFERENCES subjects(id),
+    subject_id      UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
     title           TEXT NOT NULL,
     exam_year       SMALLINT,
     exam_type       TEXT,  -- 'thu_tot_nghiep', 'ky_thi_thuong_xuyen', 'tot_nghiep_chinh_thuc'
@@ -220,7 +220,7 @@ COMMENT ON TABLE exam_papers IS 'Log đề thi gốc được nạp vào hệ th
 CREATE TABLE IF NOT EXISTS generated_exams (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    subject_id      UUID NOT NULL REFERENCES subjects(id),
+    subject_id      UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
     -- Danh sách ID câu hỏi theo thứ tự (lưu thứ tự trộn)
     question_ids    UUID[] NOT NULL,
     -- Snapshot ma trận đề tại thời điểm tạo
@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS exam_attempts (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id             UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     exam_id             UUID NOT NULL REFERENCES generated_exams(id),
-    subject_id          UUID NOT NULL REFERENCES subjects(id),
+    subject_id          UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
 
     -- Điểm số chi tiết theo từng phần
     score_part1         NUMERIC(4,2) DEFAULT 0,  -- Trắc nghiệm
@@ -290,7 +290,7 @@ COMMENT ON TABLE user_question_history IS 'Chi tiết từng câu hỏi học si
 CREATE TABLE IF NOT EXISTS user_topic_mastery (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    subject_id      UUID NOT NULL REFERENCES subjects(id),
+    subject_id      UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
     topic           TEXT NOT NULL,  -- Chuyên đề cụ thể
 
     -- Thống kê tích lũy
@@ -530,8 +530,9 @@ $$ LANGUAGE plpgsql VOLATILE;
 -- BƯỚC 16: DỮ LIỆU MẪU - Seed Data
 -- ============================================================
 
-INSERT INTO subjects (code, name, exam_matrix, topics, total_score) VALUES
+INSERT INTO subjects (id, code, name, exam_matrix, topics, total_score) VALUES
 (
+    '11111111-1111-1111-1111-111111111111',
     'GEO',
     'Địa lý',
     '{"part1": {"count": 18, "points_each": 0.25, "format": "MULTIPLE_CHOICE"}, "part2": {"count": 4, "points_each": 1.0, "format": "TRUE_FALSE"}, "part3": {"count": 6, "points_each": 0.5, "format": "SHORT_ANSWER"}}'::JSONB,
@@ -550,6 +551,7 @@ INSERT INTO subjects (code, name, exam_matrix, topics, total_score) VALUES
     10.00
 ),
 (
+    '22222222-2222-2222-2222-222222222222',
     'GDKTPL',
     'Giáo dục Kinh tế và Pháp luật',
     '{"part1": {"count": 18, "points_each": 0.25, "format": "MULTIPLE_CHOICE"}, "part2": {"count": 4, "points_each": 1.0, "format": "TRUE_FALSE"}, "part3": {"count": 6, "points_each": 0.5, "format": "SHORT_ANSWER"}}'::JSONB,
@@ -567,7 +569,12 @@ INSERT INTO subjects (code, name, exam_matrix, topics, total_score) VALUES
     ],
     10.00
 )
-ON CONFLICT (code) DO NOTHING;
+ON CONFLICT (code) DO UPDATE SET
+    id = EXCLUDED.id,
+    name = EXCLUDED.name,
+    topics = EXCLUDED.topics,
+    exam_matrix = EXCLUDED.exam_matrix,
+    total_score = EXCLUDED.total_score;
 
 INSERT INTO exam_sources (name, province, source_type, website_url) VALUES
 -- 1. BỘ GIÁO DỤC VÀ ĐÀO TẠO

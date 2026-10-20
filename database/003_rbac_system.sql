@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
 -- ============================================================
 
 -- Hàm lấy vai trò của người dùng hiện tại (Current Auth User)
-CREATE OR REPLACE FUNCTION auth.current_user_role()
+CREATE OR REPLACE FUNCTION public.current_user_role()
 RETURNS user_role AS $$
 DECLARE
     v_role user_role;
@@ -51,7 +51,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 CREATE OR REPLACE FUNCTION is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
-    RETURN (auth.current_user_role() = 'ADMIN'::user_role);
+    RETURN (public.current_user_role() = 'ADMIN'::user_role);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
@@ -59,7 +59,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 CREATE OR REPLACE FUNCTION is_teacher_or_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
-    RETURN (auth.current_user_role() IN ('TEACHER'::user_role, 'ADMIN'::user_role));
+    RETURN (public.current_user_role() IN ('TEACHER'::user_role, 'ADMIN'::user_role));
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 

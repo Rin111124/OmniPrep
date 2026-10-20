@@ -1,0 +1,66 @@
+services:
+  # ============================================================
+  # 1. OmniPrep Backend API (.NET 10)
+  # ============================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: omniprep-api
+    restart: always
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Supabase=${ConnectionStrings__Supabase}
+      - Supabase__Url=${Supabase__Url}
+      - Gemini__ApiKey=${Gemini__ApiKey}
+      - Cors__AllowedOrigins=${Cors__AllowedOrigins:-http://localhost:3000}
+      - Frontend__Url=${Frontend__Url:-http://localhost:3000}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================
+  # 2. OmniPrep Ingestion Worker (Background Daemon)
+  # ============================================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: omniprep-worker
+    restart: always
+    environment:
+      - DOTNET_ENVIRONMENT=Production
+      - ConnectionStrings__Supabase=${ConnectionStrings__Supabase}
+      - Gemini__ApiKey=${Gemini__ApiKey}
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # ============================================================
+  # 3. OmniPrep Frontend (Next.js 16) - Tùy chọn nếu host trên VPS
+  # ============================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        OMNIPREP_API_URL: ${OMNIPREP_API_URL:-http://api:8080/api}
+    container_name: omniprep-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - OMNIPREP_API_URL=http://api:8080/api
+    depends_on:
+      api:
+        condition: service_healthy

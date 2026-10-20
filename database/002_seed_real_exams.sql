@@ -4,6 +4,59 @@
 -- Hướng dẫn: Mở Supabase Dashboard -> SQL Editor -> Dán toàn bộ nội dung và bấm Run.
 -- ============================================================
 
+-- 0. Đồng bộ UUID cố định cho môn học nếu bảng subjects đã tồn tại với UUID ngẫu nhiên
+DO $$
+DECLARE
+    v_geo_old_id UUID;
+    v_gdktpl_old_id UUID;
+BEGIN
+    SELECT id INTO v_geo_old_id FROM subjects WHERE code = 'GEO' AND id != '11111111-1111-1111-1111-111111111111';
+    IF v_geo_old_id IS NOT NULL THEN
+        ALTER TABLE IF EXISTS questions DROP CONSTRAINT IF EXISTS questions_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_papers DROP CONSTRAINT IF EXISTS exam_papers_subject_id_fkey;
+        ALTER TABLE IF EXISTS generated_exams DROP CONSTRAINT IF EXISTS generated_exams_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_attempts DROP CONSTRAINT IF EXISTS exam_attempts_subject_id_fkey;
+        ALTER TABLE IF EXISTS user_topic_mastery DROP CONSTRAINT IF EXISTS user_topic_mastery_subject_id_fkey;
+
+        UPDATE questions SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE exam_papers SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE generated_exams SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE exam_attempts SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE user_topic_mastery SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+
+        UPDATE subjects SET id = '11111111-1111-1111-1111-111111111111' WHERE id = v_geo_old_id;
+
+        ALTER TABLE IF EXISTS questions ADD CONSTRAINT questions_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_papers ADD CONSTRAINT exam_papers_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS generated_exams ADD CONSTRAINT generated_exams_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_attempts ADD CONSTRAINT exam_attempts_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS user_topic_mastery ADD CONSTRAINT user_topic_mastery_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    END IF;
+
+    SELECT id INTO v_gdktpl_old_id FROM subjects WHERE code = 'GDKTPL' AND id != '22222222-2222-2222-2222-222222222222';
+    IF v_gdktpl_old_id IS NOT NULL THEN
+        ALTER TABLE IF EXISTS questions DROP CONSTRAINT IF EXISTS questions_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_papers DROP CONSTRAINT IF EXISTS exam_papers_subject_id_fkey;
+        ALTER TABLE IF EXISTS generated_exams DROP CONSTRAINT IF EXISTS generated_exams_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_attempts DROP CONSTRAINT IF EXISTS exam_attempts_subject_id_fkey;
+        ALTER TABLE IF EXISTS user_topic_mastery DROP CONSTRAINT IF EXISTS user_topic_mastery_subject_id_fkey;
+
+        UPDATE questions SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE exam_papers SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE generated_exams SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE exam_attempts SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE user_topic_mastery SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+
+        UPDATE subjects SET id = '22222222-2222-2222-2222-222222222222' WHERE id = v_gdktpl_old_id;
+
+        ALTER TABLE IF EXISTS questions ADD CONSTRAINT questions_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_papers ADD CONSTRAINT exam_papers_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS generated_exams ADD CONSTRAINT generated_exams_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_attempts ADD CONSTRAINT exam_attempts_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS user_topic_mastery ADD CONSTRAINT user_topic_mastery_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    END IF;
+END $$;
+
 -- 1. Đảm bảo Môn học đã tồn tại
 INSERT INTO subjects (id, code, name, exam_matrix, topics, total_score) VALUES
 (
@@ -35,6 +88,7 @@ INSERT INTO subjects (id, code, name, exam_matrix, topics, total_score) VALUES
     10.00
 )
 ON CONFLICT (code) DO UPDATE SET 
+    id = EXCLUDED.id,
     name = EXCLUDED.name,
     topics = EXCLUDED.topics,
     exam_matrix = EXCLUDED.exam_matrix;

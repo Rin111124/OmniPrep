@@ -123,7 +123,7 @@ COMMENT ON TABLE subjects IS 'Cấu hình môn học và ma trận đề thi chu
 -- ============================================================
 CREATE TABLE IF NOT EXISTS questions (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    subject_id          UUID NOT NULL REFERENCES subjects(id),
+    subject_id          UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
 
     -- Nội dung câu hỏi (Markdown, hỗ trợ LaTeX)
     content             TEXT NOT NULL,
@@ -177,14 +177,14 @@ COMMENT ON COLUMN questions.content_embedding IS 'Vector 768 chiều từ text-e
 ALTER TABLE questions ALTER COLUMN content_hash SET DEFAULT '';
 
 CREATE OR REPLACE FUNCTION set_question_content_hash()
-RETURNS TRIGGER AS 
+RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.content_hash IS NULL OR LENGTH(TRIM(NEW.content_hash)) = 0 THEN
         NEW.content_hash := encode(sha256(NEW.content::bytea), 'hex');
     END IF;
     RETURN NEW;
 END;
- LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_set_question_content_hash ON questions;
 CREATE TRIGGER trg_set_question_content_hash
@@ -198,7 +198,7 @@ EXECUTE FUNCTION set_question_content_hash();
 CREATE TABLE IF NOT EXISTS exam_papers (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     source_id       UUID NOT NULL REFERENCES exam_sources(id),
-    subject_id      UUID NOT NULL REFERENCES subjects(id),
+    subject_id      UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
     title           TEXT NOT NULL,
     exam_year       SMALLINT,
     exam_type       TEXT,  -- 'thu_tot_nghiep', 'ky_thi_thuong_xuyen', 'tot_nghiep_chinh_thuc'
@@ -224,7 +224,7 @@ COMMENT ON TABLE exam_papers IS 'Log đề thi gốc được nạp vào hệ th
 CREATE TABLE IF NOT EXISTS generated_exams (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    subject_id      UUID NOT NULL REFERENCES subjects(id),
+    subject_id      UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
     -- Danh sách ID câu hỏi theo thứ tự (lưu thứ tự trộn)
     question_ids    UUID[] NOT NULL,
     -- Snapshot ma trận đề tại thời điểm tạo
@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS exam_attempts (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id             UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     exam_id             UUID NOT NULL REFERENCES generated_exams(id),
-    subject_id          UUID NOT NULL REFERENCES subjects(id),
+    subject_id          UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
 
     -- Điểm số chi tiết theo từng phần
     score_part1         NUMERIC(4,2) DEFAULT 0,  -- Trắc nghiệm
@@ -294,7 +294,7 @@ COMMENT ON TABLE user_question_history IS 'Chi tiết từng câu hỏi học si
 CREATE TABLE IF NOT EXISTS user_topic_mastery (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id         UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    subject_id      UUID NOT NULL REFERENCES subjects(id),
+    subject_id      UUID NOT NULL REFERENCES subjects(id) ON UPDATE CASCADE,
     topic           TEXT NOT NULL,  -- Chuyên đề cụ thể
 
     -- Thống kê tích lũy
@@ -534,8 +534,9 @@ $$ LANGUAGE plpgsql VOLATILE;
 -- BƯỚC 16: DỮ LIỆU MẪU - Seed Data
 -- ============================================================
 
-INSERT INTO subjects (code, name, exam_matrix, topics, total_score) VALUES
+INSERT INTO subjects (id, code, name, exam_matrix, topics, total_score) VALUES
 (
+    '11111111-1111-1111-1111-111111111111',
     'GEO',
     'Địa lý',
     '{"part1": {"count": 18, "points_each": 0.25, "format": "MULTIPLE_CHOICE"}, "part2": {"count": 4, "points_each": 1.0, "format": "TRUE_FALSE"}, "part3": {"count": 6, "points_each": 0.5, "format": "SHORT_ANSWER"}}'::JSONB,
@@ -554,6 +555,7 @@ INSERT INTO subjects (code, name, exam_matrix, topics, total_score) VALUES
     10.00
 ),
 (
+    '22222222-2222-2222-2222-222222222222',
     'GDKTPL',
     'Giáo dục Kinh tế và Pháp luật',
     '{"part1": {"count": 18, "points_each": 0.25, "format": "MULTIPLE_CHOICE"}, "part2": {"count": 4, "points_each": 1.0, "format": "TRUE_FALSE"}, "part3": {"count": 6, "points_each": 0.5, "format": "SHORT_ANSWER"}}'::JSONB,
@@ -571,7 +573,12 @@ INSERT INTO subjects (code, name, exam_matrix, topics, total_score) VALUES
     ],
     10.00
 )
-ON CONFLICT (code) DO NOTHING;
+ON CONFLICT (code) DO UPDATE SET
+    id = EXCLUDED.id,
+    name = EXCLUDED.name,
+    topics = EXCLUDED.topics,
+    exam_matrix = EXCLUDED.exam_matrix,
+    total_score = EXCLUDED.total_score;
 
 INSERT INTO exam_sources (name, province, source_type, website_url) VALUES
 -- 1. BỘ GIÁO DỤC VÀ ĐÀO TẠO
@@ -785,6 +792,59 @@ ON CONFLICT (name) DO NOTHING;
 -- Hướng dẫn: Mở Supabase Dashboard -> SQL Editor -> Dán toàn bộ nội dung và bấm Run.
 -- ============================================================
 
+-- 0. Đồng bộ UUID cố định cho môn học nếu bảng subjects đã tồn tại với UUID ngẫu nhiên
+DO $$
+DECLARE
+    v_geo_old_id UUID;
+    v_gdktpl_old_id UUID;
+BEGIN
+    SELECT id INTO v_geo_old_id FROM subjects WHERE code = 'GEO' AND id != '11111111-1111-1111-1111-111111111111';
+    IF v_geo_old_id IS NOT NULL THEN
+        ALTER TABLE IF EXISTS questions DROP CONSTRAINT IF EXISTS questions_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_papers DROP CONSTRAINT IF EXISTS exam_papers_subject_id_fkey;
+        ALTER TABLE IF EXISTS generated_exams DROP CONSTRAINT IF EXISTS generated_exams_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_attempts DROP CONSTRAINT IF EXISTS exam_attempts_subject_id_fkey;
+        ALTER TABLE IF EXISTS user_topic_mastery DROP CONSTRAINT IF EXISTS user_topic_mastery_subject_id_fkey;
+
+        UPDATE questions SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE exam_papers SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE generated_exams SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE exam_attempts SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+        UPDATE user_topic_mastery SET subject_id = '11111111-1111-1111-1111-111111111111' WHERE subject_id = v_geo_old_id;
+
+        UPDATE subjects SET id = '11111111-1111-1111-1111-111111111111' WHERE id = v_geo_old_id;
+
+        ALTER TABLE IF EXISTS questions ADD CONSTRAINT questions_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_papers ADD CONSTRAINT exam_papers_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS generated_exams ADD CONSTRAINT generated_exams_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_attempts ADD CONSTRAINT exam_attempts_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS user_topic_mastery ADD CONSTRAINT user_topic_mastery_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    END IF;
+
+    SELECT id INTO v_gdktpl_old_id FROM subjects WHERE code = 'GDKTPL' AND id != '22222222-2222-2222-2222-222222222222';
+    IF v_gdktpl_old_id IS NOT NULL THEN
+        ALTER TABLE IF EXISTS questions DROP CONSTRAINT IF EXISTS questions_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_papers DROP CONSTRAINT IF EXISTS exam_papers_subject_id_fkey;
+        ALTER TABLE IF EXISTS generated_exams DROP CONSTRAINT IF EXISTS generated_exams_subject_id_fkey;
+        ALTER TABLE IF EXISTS exam_attempts DROP CONSTRAINT IF EXISTS exam_attempts_subject_id_fkey;
+        ALTER TABLE IF EXISTS user_topic_mastery DROP CONSTRAINT IF EXISTS user_topic_mastery_subject_id_fkey;
+
+        UPDATE questions SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE exam_papers SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE generated_exams SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE exam_attempts SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+        UPDATE user_topic_mastery SET subject_id = '22222222-2222-2222-2222-222222222222' WHERE subject_id = v_gdktpl_old_id;
+
+        UPDATE subjects SET id = '22222222-2222-2222-2222-222222222222' WHERE id = v_gdktpl_old_id;
+
+        ALTER TABLE IF EXISTS questions ADD CONSTRAINT questions_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_papers ADD CONSTRAINT exam_papers_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS generated_exams ADD CONSTRAINT generated_exams_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS exam_attempts ADD CONSTRAINT exam_attempts_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+        ALTER TABLE IF EXISTS user_topic_mastery ADD CONSTRAINT user_topic_mastery_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES subjects(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    END IF;
+END $$;
+
 -- 1. Đảm bảo Môn học đã tồn tại
 INSERT INTO subjects (id, code, name, exam_matrix, topics, total_score) VALUES
 (
@@ -816,6 +876,7 @@ INSERT INTO subjects (id, code, name, exam_matrix, topics, total_score) VALUES
     10.00
 )
 ON CONFLICT (code) DO UPDATE SET 
+    id = EXCLUDED.id,
     name = EXCLUDED.name,
     topics = EXCLUDED.topics,
     exam_matrix = EXCLUDED.exam_matrix;
@@ -1176,7 +1237,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_role ON profiles(role);
 -- ============================================================
 
 -- Hàm lấy vai trò của người dùng hiện tại (Current Auth User)
-CREATE OR REPLACE FUNCTION auth.current_user_role()
+CREATE OR REPLACE FUNCTION public.current_user_role()
 RETURNS user_role AS $$
 DECLARE
     v_role user_role;
@@ -1193,7 +1254,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 CREATE OR REPLACE FUNCTION is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
-    RETURN (auth.current_user_role() = 'ADMIN'::user_role);
+    RETURN (public.current_user_role() = 'ADMIN'::user_role);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
@@ -1201,7 +1262,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 CREATE OR REPLACE FUNCTION is_teacher_or_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
-    RETURN (auth.current_user_role() IN ('TEACHER'::user_role, 'ADMIN'::user_role));
+    RETURN (public.current_user_role() IN ('TEACHER'::user_role, 'ADMIN'::user_role));
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
