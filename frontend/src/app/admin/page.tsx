@@ -225,13 +225,25 @@ export default function AdminPage() {
       <Navbar />
       <RoleGuard allowedRoles={['ADMIN', 'TEACHER']}>
         <main className="mx-auto max-w-5xl space-y-8 px-4 py-10 sm:px-6 lg:px-8">
-          <header className="space-y-2">
-            <h1 className="text-3xl font-black">Quản trị & Kiểm duyệt Ngân hàng đề</h1>
-            <p className="text-sm text-slate-400">
-              {role === 'ADMIN'
-                ? 'Nạp đề thi dạng văn bản vào hàng đợi và kiểm duyệt nội dung câu hỏi.'
-                : 'Xem xét và phê duyệt hoặc từ chối câu hỏi trước khi đưa vào ngân hàng đề.'}
-            </p>
+          <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
+            <div className="space-y-1">
+              <h1 className="text-3xl font-black">Quản trị & Kiểm duyệt Ngân hàng đề</h1>
+              <p className="text-sm text-slate-400">
+                {role === 'ADMIN'
+                  ? 'Nạp đề thi dạng văn bản vào hàng đợi và kiểm duyệt nội dung câu hỏi.'
+                  : 'Xem xét và phê duyệt hoặc từ chối câu hỏi trước khi đưa vào ngân hàng đề.'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">Quyền hạn:</span>
+              <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border ${
+                role === 'ADMIN'
+                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                  : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+              }`}>
+                {role === 'ADMIN' ? '🛡️ Toàn quyền Admin' : '👨‍🏫 Giáo viên Kiểm duyệt'}
+              </span>
+            </div>
           </header>
 
           {/* Moderation Metrics Bar */}
@@ -364,32 +376,34 @@ export default function AdminPage() {
 
                 <p className="text-xs text-slate-500">Nguồn: {question.sourceTags?.join(', ') || 'Chưa có thông tin nguồn'}</p>
 
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-white/5">
                   <button
                     disabled={reviewingId !== null}
                     onClick={() => void handleReview(question.id, 'verify')}
-                    className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-bold text-white disabled:opacity-50 transition-colors"
+                    className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50 transition-colors shrink-0"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>{reviewingId === question.id ? 'Đang lưu…' : 'Duyệt & Xuất bản'}</span>
                   </button>
 
-                  <input
-                    value={reviewNotes[question.id] || ''}
-                    onChange={event => setReviewNotes(current => ({ ...current, [question.id]: event.target.value }))}
-                    maxLength={1000}
-                    placeholder="Lý do từ chối (bắt buộc khi từ chối)"
-                    className="min-w-56 flex-1 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs"
-                  />
+                  <div className="flex items-center gap-2 flex-1">
+                    <input
+                      value={reviewNotes[question.id] || ''}
+                      onChange={event => setReviewNotes(current => ({ ...current, [question.id]: event.target.value }))}
+                      maxLength={1000}
+                      placeholder="Lý do từ chối (bắt buộc khi từ chối)"
+                      className="w-full flex-1 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs"
+                    />
 
-                  <button
-                    disabled={reviewingId !== null || !reviewNotes[question.id]?.trim()}
-                    onClick={() => void handleReview(question.id, 'reject')}
-                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/40 px-3.5 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-50 transition-colors"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    <span>Từ chối</span>
-                  </button>
+                    <button
+                      disabled={reviewingId !== null || !reviewNotes[question.id]?.trim()}
+                      onClick={() => void handleReview(question.id, 'reject')}
+                      className="flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/40 px-3.5 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-50 transition-colors shrink-0"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Từ chối</span>
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}

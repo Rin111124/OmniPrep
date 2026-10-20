@@ -1,90 +1,75 @@
-# OmniPrep (Prep12.vn) 🎓
-### Nền tảng ôn luyện thi tốt nghiệp THPT đa môn
+# OmniPrep (Prep12.vn)
 
-> Trạng thái hiện tại: MVP kỹ thuật; chưa xác nhận vận hành production. Chi phí và hạn mức phụ thuộc gói dịch vụ, cấu hình và mức sử dụng.
+Nền tảng ôn luyện thi tốt nghiệp THPT đa môn, gồm frontend Next.js, API ASP.NET Core, Supabase PostgreSQL/Auth, worker nhập đề và tích hợp Gemini.
 
-## Trạng thái các luồng chính
+> **Trạng thái:** MVP kỹ thuật. Chưa xác nhận triển khai production. Chỉ bật môn có chiến lược chấm tương ứng và ngân hàng câu hỏi đã được người có chuyên môn duyệt.
 
-- Xác thực và vai trò dùng Supabase Auth; vai trò đặc quyền lấy từ metadata do máy chủ quản lý.
-- Backend tạo attempt, autosave và khôi phục câu trả lời, chấm bài và lưu lịch sử. Chiến lược chấm hiện được đăng ký cho Địa lý và Giáo dục Kinh tế & Pháp luật; các môn khác cần được xác nhận.
-- Gia sư AI truyền phản hồi qua SSE khi Gemini được cấu hình.
-- Admin gửi đề `.txt` vào hàng đợi. Worker xử lý với SHA-256/pgvector deduplication, lease và retry hữu hạn; dữ liệu web crawl tự động chưa được cấu hình. Giáo viên/admin có hàng chờ duyệt, duyệt hoặc từ chối câu hỏi với lý do; OCR, chỉnh sửa câu và xuất bản chưa được triển khai.
-- Trang chủ hiển thị số câu đã duyệt theo từng phần; chỉ bật tạo đề khi môn có chiến lược chấm và đủ câu theo ma trận. Dashboard và mastery lấy dữ liệu từ API nhưng cần kiểm chứng trên staging trước khi dùng làm căn cứ học tập.
+## Chức năng hiện có
 
-Migration `006`–`008` cần được áp dụng trên staging; dừng worker khi chạy migration `007`. Đề thi cần được người có trách nhiệm kiểm duyệt trước khi mở cho học sinh. Workflow crawl chạy theo lịch đã được gỡ bỏ: worker hiện chỉ đọc thư mục local, chưa có nguồn web được phê duyệt.
+- Đăng ký/đăng nhập Supabase; API xác thực access token qua OIDC/JWKS. Role đặc quyền được cấp qua metadata do máy chủ quản lý.
+- Tạo attempt, autosave/khôi phục đáp án, nộp bài và xem kết quả qua API.
+- Chiến lược chấm hiện được đăng ký cho Địa lý (`GEO`) và GDKT&PL (`GDKTPL`). Môn khác chưa sẵn sàng chỉ vì xuất hiện trong danh mục.
+- Gia sư AI SSE khi Gemini được cấu hình.
+- Admin nạp tài liệu `.txt`; worker trích xuất và đưa câu hỏi vào hàng chờ. Giáo viên/admin có thể chỉnh sửa, duyệt hoặc từ chối câu hỏi.
+- Dashboard và sổ tay câu sai lấy dữ liệu từ API; cần xác nhận đầy đủ trên staging trước khi dùng làm căn cứ học tập.
 
-## CI
+## Cấu trúc
 
-Workflow `.github/workflows/ci.yml` chạy restore/build .NET, audit dependency NuGet và npm runtime, lint không cho phép warning, typecheck và build frontend. Workflow không cần secrets production. Repo hiện chưa có automated test suite; CI cần được xác nhận chạy trên GitHub sau khi nối repo.
-
----
-```
-OmniPrep/
-├── database/
-│   └── 001_init_schema.sql         # Supabase PostgreSQL schema + pgvector + HNSW index + RLS + Triggers
-├── src/
-│   ├── OmniPrep.Domain/            # Entities, ValueObjects, Enums, Interfaces (Clean Architecture)
-│   ├── OmniPrep.Infrastructure/    # EF Core DbContext, pgvector, Gemini 2.0 Client, Ingestion & Grading
-│   ├── OmniPrep.Api/               # ASP.NET Core Minimal APIs, SSE Streaming, Supabase JWT Auth
-│   └── OmniPrep.Worker/            # Background Worker Service xử lý ingestion queue với lease và retry hữu hạn
-├── frontend/                       # Next.js 16 + React 19 + TypeScript + Tailwind CSS v4
-│   ├── src/app/                    # Pages: Trang chủ, Phòng thi 50p, Heatmap, Admin Ingestion
-│   ├── src/components/             # Navbar, QuestionCard, QuestionPalette, ExamHeader, AiTutorDrawer
-│   └── src/lib/                    # API client and BGD 2025 grading engine
-└── README.md
+```text
+database/                 PostgreSQL schema, migrations và seed
+src/OmniPrep.Api/         ASP.NET Core API
+src/OmniPrep.Worker/      Background ingestion worker
+src/OmniPrep.Infrastructure/ EF Core, Supabase/PostgreSQL và Gemini
+src/OmniPrep.Domain/      Entities, enums, interfaces và domain services
+frontend/                 Next.js 16, React 19, TypeScript
+tests/                    .NET automated tests
+Dockerfile.*              Container images
+docker-compose.yml        Local/VPS deployment
 ```
 
----
+## Chạy local
 
-## 🚀 HƯỚNG DẪN KHỞI CHẠY (LOCAL DEVELOPMENT)
+### 1. Database
 
-### 1. Khởi tạo Cơ sở dữ liệu Supabase
-1. Đăng ký tài khoản miễn phí tại [supabase.com](https://supabase.com).
-2. Tạo dự án mới, vào mục **SQL Editor**.
-3. Với database mới, áp dụng SQL migrations trong `database/` theo thứ tự `001` đến `008`; với database hiện có, áp dụng các migration bổ sung chưa chạy theo thứ tự.
-4. Lấy connection string từ **Project Settings -> Database**; dùng OIDC/JWKS để xác minh token (không cần JWT secret trong API).
+Tạo Supabase project dành cho development. Với database mới, rà soát rồi chạy `database/all_migrations.sql` một lần trong SQL Editor. Với database đã tồn tại, chỉ áp dụng migration còn thiếu theo thứ tự `001`–`010`; dừng worker khi áp dụng migration `007`. Xem [hướng dẫn triển khai](docs/deployment-guide.md) trước khi chạy migrations trên dữ liệu có giá trị.
 
-### 2. Backend configuration
-Set `ConnectionStrings__Supabase`, `Supabase__Url`, and `Gemini__ApiKey` as process environment variables or deployment secrets. Configure the Supabase project to sign access tokens with an asymmetric key (ES256 or RS256); the API validates tokens from the project OIDC discovery/JWKS endpoint. Do not share a Supabase JWT signing secret with the API.
+### 2. API và worker
 
-Run the API:
+Đặt các biến sau trong process environment hoặc user secrets:
+
+- `ConnectionStrings__Supabase`
+- `Supabase__Url`
+- `Gemini__ApiKey` (nếu dùng tutor/ingestion)
+- `Cors__AllowedOrigins` và `Frontend__Url` theo domain local/staging
+
+Cấu hình Supabase Auth dùng signing key bất đối xứng ES256/RS256 tương thích OIDC/JWKS. Không đưa JWT signing secret hoặc Gemini key vào frontend.
+
 ```powershell
 dotnet run --project src/OmniPrep.Api/OmniPrep.Api.csproj
-```
-
-In a separate terminal, run the ingestion worker after applying migrations and configuring the same database/provider secrets:
-```powershell
 dotnet run --project src/OmniPrep.Worker/OmniPrep.Worker.csproj
 ```
-Backend API sẽ lắng nghe tại `http://localhost:5000` (OpenAPI JSON tại `http://localhost:5000/openapi/v1.json`).
 
-### 3. Chạy Frontend Next.js
-Mở terminal tại thư mục `frontend`:
+API local mặc định lắng nghe ở `http://localhost:5000`.
+
+### 3. Frontend
+
+Đặt `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` và `OMNIPREP_API_URL` trong môi trường frontend, rồi chạy:
+
 ```powershell
 cd frontend
+npm ci
 npm run dev
 ```
-Mở trình duyệt truy cập: **`http://localhost:3000`**
 
----
+Mở `http://localhost:3000`.
 
-## 🎯 CÁC TRANG CHÍNH TRÊN GIAO DIỆN
+## Kiểm tra chất lượng
 
-- `/` — tải danh sách môn học từ API và chọn môn để bắt đầu.
-- `/exam` — tạo hoặc tiếp tục attempt đã đăng nhập; câu trả lời được autosave theo attempt.
-- `/exam/[id]/result` — hiển thị kết quả đã nộp trên trình duyệt hiện tại.
-- `/dashboard` và `/mistakes` — xem dữ liệu mastery và sổ tay; sổ tay hiện lưu localStorage theo user ID.
-- `/admin` — ADMIN gửi đề `.txt`; TEACHER/ADMIN duyệt hoặc từ chối câu hỏi; chưa có chỉnh sửa hay xuất bản.
----
+GitHub Actions workflow `.github/workflows/ci.yml` định nghĩa .NET restore/build/test, dependency audit, ESLint, TypeScript check và Next.js build. Chưa khẳng định workflow đã chạy xanh trên GitHub; kiểm tra trạng thái CI của đúng commit trước khi phát hành.
 
-## Trạng thái triển khai và quyền truy cập
+## Triển khai và production readiness
 
-OmniPrep hiện là MVP kỹ thuật. Tài khoản và quyền được xác thực qua Supabase; vai trò lấy từ `app_metadata` do máy chủ quản lý. Không có nút đổi vai trò thử nghiệm trên giao diện.
+- [Lộ trình cải thiện và tiêu chí Go/No-Go](docs/production-readiness-plan.md)
+- [Hướng dẫn triển khai staging/production](docs/deployment-guide.md)
 
-- Học sinh đã đăng nhập có thể xem môn học, tạo/nộp bài theo các API hiện có và dùng gia sư AI khi Gemini được cấu hình.
-- `/admin` cho `ADMIN` và `TEACHER`; admin mới được nạp `.txt`, cả hai vai trò có thể duyệt hoặc từ chối câu hỏi.
-- Giao diện duyệt/từ chối câu hỏi đã có, có ghi nhận người duyệt/thời gian/lý do; chỉnh sửa câu, OCR, xuất bản và quản lý người dùng chưa được triển khai. Không dùng dữ liệu câu hỏi chưa được người có trách nhiệm kiểm duyệt để tổ chức thi thật.
-- Câu trả lời trong khi làm bài và sổ tay câu sai hiện lưu ở trình duyệt; chưa hỗ trợ tiếp tục bài trên thiết bị khác hoặc đồng bộ sổ tay theo tài khoản.
-- Các quyền `TEACHER`, dashboard, thống kê và tutor cần được xác nhận bằng staging trước khi công bố phạm vi sử dụng.
-
-Xem [lộ trình production readiness](docs/production-readiness-plan.md) để biết các điều kiện phát hành theo giai đoạn.
+Các điểm cần xác nhận trước khi mở beta: health/readiness, Supabase role/RLS, migrations, khôi phục bài thi khi mất mạng, chất lượng câu hỏi/đáp án, backup/restore, quota Gemini, quyền riêng tư và rollback. Endpoint xóa dữ liệu hiện xóa dữ liệu học tập trong ứng dụng nhưng không xóa người dùng Supabase Auth.

@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { user: userProfile, isLoading: authLoading, signOut } = useAuth();
+  const { user: userProfile, role, canAccessAdmin, isLoading: authLoading, signOut } = useAuth();
   const [selectedSubject, setSelectedSubject] = useState<SubjectCode>('GEOGRAPHY');
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -77,11 +77,39 @@ export default function DashboardPage() {
     return <div className="min-h-screen bg-[#07090e] text-white"><Navbar /><main className="mx-auto mt-16 max-w-xl rounded-3xl border border-white/10 bg-slate-950/80 p-8 text-center"><h1 className="text-xl font-bold">Đăng nhập để xem tiến độ</h1><p className="mt-3 text-sm text-slate-400">Kết quả và biểu đồ được lấy từ các lượt thi đã lưu trong tài khoản của bạn.</p><Link href="/login" className="mt-5 inline-flex rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold">Đăng nhập</Link></main></div>;
   }
 
+  const roleLabel = role === 'ADMIN' ? 'Quản trị viên' : role === 'TEACHER' ? 'Giáo viên' : 'Học sinh';
+
   return (
     <div className="min-h-screen flex flex-col bg-[#07090e]">
       <Navbar />
 
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-10">
+        {/* Admin Shortcut Banner (Chỉ xuất hiện khi là Admin hoặc Giáo viên) */}
+        {canAccessAdmin && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-slate-900 border border-purple-500/30 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-300">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="font-bold text-white text-sm">
+                  Khu vực Quản trị & Hiệu đính ({roleLabel})
+                </p>
+                <p className="text-xs text-slate-400">
+                  Bạn có quyền bóc tách đề thi, quản lý ngân hàng câu hỏi và phê duyệt đề thi.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/admin"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-600/30 shrink-0"
+            >
+              <span>Vào trang Quản trị</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        )}
+
         {/* ============================================================ */}
         {/* 1. HEADER & XÁC THỰC (SUPABASE AUTH / USER PROFILE BAR) */}
         {/* ============================================================ */}
@@ -103,8 +131,14 @@ export default function DashboardPage() {
                   <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
                     {userProfile.name}
                   </h1>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    {userProfile.role === 'STUDENT' ? 'Học sinh' : userProfile.role}
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                    role === 'ADMIN'
+                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                      : role === 'TEACHER'
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                  }`}>
+                    {roleLabel}
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 font-medium">

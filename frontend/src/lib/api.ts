@@ -610,5 +610,60 @@ export async function updatePendingQuestion(
   return response.json();
 }
 
+export interface UserDataExport {
+  exportedAt: string;
+  userId: string;
+  profile: {
+    fullName: string;
+    grade: number;
+    schoolName: string;
+    scoreGoals: Record<string, number>;
+    role: string;
+    createdAt: string;
+  } | null;
+  attempts: Array<{
+    id: string;
+    subjectId: string;
+    subjectCode: string;
+    totalScore: number;
+    scorePart1: number;
+    scorePart2: number;
+    scorePart3: number;
+    isSubmitted: boolean;
+    startedAt: string;
+    submittedAt: string | null;
+    timeSpentSeconds: number;
+  }>;
+  topicMasteries: Array<{
+    topic: string;
+    totalAttempts: number;
+    totalCorrect: number;
+    masteryRate: number;
+    masteryScore: number;
+    lastPracticed: string;
+  }>;
+  mistakes: Array<{
+    questionId: string;
+    subjectCode: string;
+    studentAnswer: unknown;
+    mastered: boolean;
+    notes: string | null;
+    createdAt: string;
+  }>;
+}
+
+export async function exportUserData(): Promise<UserDataExport> {
+  const response = await backendFetch('/users/me/export');
+  return response.json();
+}
+
+export async function deleteUserData(): Promise<{ message: string }> {
+  const response = await backendFetch('/users/me', {
+    method: 'DELETE'
+  });
+  return response.json();
+}
+
+
 
 

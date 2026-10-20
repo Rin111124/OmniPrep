@@ -38,7 +38,7 @@ export const QuestionPalette: React.FC<QuestionPaletteProps> = ({
 
   const renderQuestionButtons = (groupQuestions: Question[]) => {
     return (
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-5 sm:grid-cols-6 lg:grid-cols-5 gap-1.5 sm:gap-2">
         {groupQuestions.map((q) => {
           const globalIndex = questions.findIndex(item => item.id === q.id);
           const answered = isAnswered(q);
@@ -49,7 +49,7 @@ export const QuestionPalette: React.FC<QuestionPaletteProps> = ({
             <button
               key={q.id}
               onClick={() => onSelectQuestion(globalIndex)}
-              className={`relative h-10 rounded-lg text-xs font-bold transition-all flex items-center justify-center border ${
+              className={`relative h-9 sm:h-10 rounded-lg text-xs font-bold transition-all flex items-center justify-center border touch-manipulation active:scale-95 ${
                 isCurrent
                   ? 'border-cyan-400 bg-cyan-500/20 text-cyan-200 ring-2 ring-cyan-400/50 shadow-md'
                   : answered
@@ -110,7 +110,7 @@ export const QuestionPalette: React.FC<QuestionPaletteProps> = ({
       </div>
 
       {/* Danh sách 3 phần */}
-      <div className="space-y-4 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
+      <div className="space-y-4 max-h-[min(60vh,450px)] lg:max-h-[calc(100vh-320px)] overflow-y-auto pr-1 overscroll-contain">
         {partI.length > 0 && (
           <div>
             <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">

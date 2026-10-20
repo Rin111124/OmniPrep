@@ -65,30 +65,30 @@ export default function HomePage() {
             Tạo bài thi theo ma trận ở các môn hiện được hỗ trợ, lưu tiến độ làm bài và xem giải thích từ gia sư Gemini khi được cấu hình.
           </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 sm:gap-4 pt-4 max-w-xl mx-auto sm:max-w-none">
             <Link
               href={`/exam?subject=${selectedSubject}`}
               aria-disabled={readySubjects.length === 0}
-              className={`flex items-center gap-2.5 px-7 py-3.5 rounded-2xl font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:opacity-95 shadow-xl shadow-indigo-600/30 transition-all hover:scale-105 ${readySubjects.length ? '' : 'pointer-events-none opacity-50'}`}
+              className={`flex items-center justify-center gap-2.5 px-6 sm:px-7 py-3.5 rounded-2xl font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:opacity-95 shadow-xl shadow-indigo-600/30 transition-all hover:scale-105 active:scale-95 text-xs sm:text-sm ${readySubjects.length ? '' : 'pointer-events-none opacity-50'}`}
             >
-              <GraduationCap className="w-5 h-5" />
+              <GraduationCap className="w-5 h-5 shrink-0" />
               <span>{readySubjects.length ? 'Bắt đầu luyện tập' : subjects.length ? 'Chưa có môn đủ điều kiện tạo đề' : 'Đang tải môn học'}</span>
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4 shrink-0" />
             </Link>
 
             <Link
               href="/mistakes"
-              className="flex items-center gap-2.5 px-6 py-3.5 rounded-2xl font-bold text-rose-300 bg-rose-950/40 border border-rose-500/30 hover:border-rose-500/50 hover:bg-rose-900/40 transition-all"
+              className="flex items-center justify-center gap-2.5 px-5 sm:px-6 py-3.5 rounded-2xl font-bold text-rose-300 bg-rose-950/40 border border-rose-500/30 hover:border-rose-500/50 hover:bg-rose-900/40 transition-all text-xs sm:text-sm active:scale-95"
             >
-              <BookMarked className="w-4 h-4 text-rose-400" />
+              <BookMarked className="w-4 h-4 text-rose-400 shrink-0" />
               <span>Sổ tay Bẫy Đề Thi</span>
             </Link>
 
             <Link
               href="/dashboard"
-              className="flex items-center gap-2.5 px-6 py-3.5 rounded-2xl font-bold text-slate-200 bg-slate-900/80 border border-white/10 hover:border-white/25 hover:bg-slate-800/80 transition-all"
+              className="flex items-center justify-center gap-2.5 px-5 sm:px-6 py-3.5 rounded-2xl font-bold text-slate-200 bg-slate-900/80 border border-white/10 hover:border-white/25 hover:bg-slate-800/80 transition-all text-xs sm:text-sm active:scale-95"
             >
-              <Flame className="w-4 h-4 text-amber-400" />
+              <Flame className="w-4 h-4 text-amber-400 shrink-0" />
               <span>Bản đồ Nhiệt Lỗ hổng</span>
             </Link>
           </div>

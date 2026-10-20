@@ -76,4 +76,19 @@ public class EndpointHelpersTests
         Assert.True(EndpointHelpers.IsTeacherOrAdmin(teacher));
         Assert.False(EndpointHelpers.IsTeacherOrAdmin(student));
     }
+
+    [Fact]
+    public void GetUserRole_UserMetadataNeverGrantsPrivileges()
+    {
+        // P0: User metadata can be manipulated by users, backend MUST NOT use it for authorization
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim("user_metadata", "{\"role\":\"ADMIN\"}")
+        }, "TestAuth");
+        var principal = new ClaimsPrincipal(identity);
+
+        var actualRole = EndpointHelpers.GetUserRole(principal);
+        Assert.Equal(UserRole.Student, actualRole);
+        Assert.False(EndpointHelpers.IsTeacherOrAdmin(principal));
+    }
 }

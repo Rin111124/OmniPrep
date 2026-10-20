@@ -273,19 +273,22 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               <TableIcon className="w-4 h-4 text-cyan-400" />
               <span>{activeTable.title || 'Bảng số liệu thống kê'}</span>
             </div>
-            {activeTable.unit && (
-              <span className="text-[11px] font-mono text-cyan-300 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-500/20">
-                Đơn vị tính: {activeTable.unit}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-400 sm:hidden">↔ Cuộn xem đủ cột</span>
+              {activeTable.unit && (
+                <span className="text-[11px] font-mono text-cyan-300 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-500/20">
+                  Đơn vị: {activeTable.unit}
+                </span>
+              )}
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
             <table className="w-full text-left border-collapse text-xs sm:text-sm">
               <thead>
                 <tr className="border-b border-white/10 bg-white/5 text-slate-200">
                   {activeTable.headers.map((h, i) => (
-                    <th key={i} className="py-2.5 px-4 font-bold tracking-wide">
+                    <th key={i} className="py-2.5 px-3 sm:px-4 font-bold tracking-wide whitespace-nowrap">
                       {h}
                     </th>
                   ))}
@@ -298,7 +301,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                     className="hover:bg-white/5 transition-colors font-mono text-slate-300"
                   >
                     {row.map((cell, cIdx) => (
-                      <td key={cIdx} className="py-2.5 px-4">
+                      <td key={cIdx} className="py-2.5 px-3 sm:px-4 whitespace-nowrap sm:whitespace-normal">
                         {cell}
                       </td>
                     ))}
@@ -333,7 +336,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 key={key}
                 onContextMenu={(e) => toggleEliminate(e, key)}
                 onClick={() => handleSelectOption(key)}
-                className={`w-full text-left p-4 rounded-2xl border transition-all flex items-start justify-between gap-3.5 cursor-pointer relative group ${
+                className={`w-full text-left p-3.5 sm:p-4 rounded-2xl border transition-all flex items-start justify-between gap-3 cursor-pointer relative group touch-manipulation ${
                   isEliminated
                     ? 'opacity-35 bg-slate-950/40 border-white/5 text-slate-500 line-through'
                     : isSelected
@@ -341,9 +344,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                     : 'bg-slate-900/50 border-white/10 text-slate-300 hover:bg-slate-800/60 hover:border-slate-600'
                 }`}
               >
-                <div className="flex items-start gap-3.5 flex-1">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
                   <span
-                    className={`flex-shrink-0 w-8 h-8 rounded-xl font-bold flex items-center justify-center text-sm transition-colors ${
+                    className={`shrink-0 w-8 h-8 rounded-xl font-bold flex items-center justify-center text-sm transition-colors ${
                       isEliminated
                         ? 'bg-slate-800 text-slate-600'
                         : isSelected
@@ -353,7 +356,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   >
                     {key}
                   </span>
-                  <span className={`pt-1 text-sm sm:text-base leading-snug ${isEliminated ? 'line-through' : ''}`}>
+                  <span className={`pt-1 text-sm sm:text-base leading-snug break-words ${isEliminated ? 'line-through' : ''}`}>
                     <MathRenderer content={text} />
                   </span>
                 </div>
@@ -362,10 +365,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 <button
                   type="button"
                   onClick={(e) => toggleEliminate(e, key)}
-                  className={`p-1.5 rounded-lg text-xs transition-colors self-start ${
+                  className={`p-2 rounded-lg text-xs transition-colors self-start shrink-0 touch-manipulation ${
                     isEliminated
-                      ? 'text-cyan-400 bg-cyan-950/40 hover:bg-cyan-900/40'
-                      : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 opacity-0 group-hover:opacity-100'
+                      ? 'text-cyan-400 bg-cyan-950/40 hover:bg-cyan-900/40 opacity-100'
+                      : 'text-slate-500 hover:text-slate-300 hover:bg-white/5 opacity-70 sm:opacity-0 sm:group-hover:opacity-100'
                   }`}
                   title={isEliminated ? 'Bỏ gạch loại trừ' : 'Gạch loại trừ phương án này'}
                 >
@@ -391,23 +394,23 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               return (
                 <div
                   key={subKey}
-                  className="p-4 sm:p-5 rounded-2xl bg-slate-900/60 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  className="p-3.5 sm:p-5 rounded-2xl bg-slate-900/60 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4"
                 >
-                  <div className="flex items-start gap-3 flex-1">
-                    <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-bold flex items-center justify-center text-xs">
+                  <div className="flex items-start gap-2.5 sm:gap-3 flex-1 min-w-0">
+                    <span className="shrink-0 w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-bold flex items-center justify-center text-xs">
                       {subKey})
                     </span>
-                    <span className="text-sm sm:text-base text-slate-200 font-medium pt-0.5 leading-snug">
+                    <span className="text-sm sm:text-base text-slate-200 font-medium pt-0.5 leading-snug break-words">
                       <MathRenderer content={subText} />
                     </span>
                   </div>
 
-                  {/* Large Radio Toggles [ĐÚNG] and [SAI] */}
-                  <div className="flex items-center gap-2.5 self-end sm:self-center flex-shrink-0">
+                  {/* Responsive Radio Toggles [ĐÚNG] and [SAI] (Full width grid on mobile, horizontal on desktop) */}
+                  <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto shrink-0 pt-1 sm:pt-0">
                     <button
                       type="button"
                       onClick={() => handleToggleSubAnswer(subKey, true)}
-                      className={`px-5 py-2.5 rounded-xl text-xs font-extrabold tracking-wider transition-all border cursor-pointer ${
+                      className={`py-2.5 sm:px-5 rounded-xl text-xs sm:text-sm font-extrabold tracking-wider transition-all border cursor-pointer text-center touch-manipulation ${
                         currentSubVal === true
                           ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-500/40'
                           : 'bg-slate-950/70 text-slate-400 border-white/10 hover:border-emerald-500/40 hover:text-emerald-300'
@@ -418,7 +421,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                     <button
                       type="button"
                       onClick={() => handleToggleSubAnswer(subKey, false)}
-                      className={`px-5 py-2.5 rounded-xl text-xs font-extrabold tracking-wider transition-all border cursor-pointer ${
+                      className={`py-2.5 sm:px-5 rounded-xl text-xs sm:text-sm font-extrabold tracking-wider transition-all border cursor-pointer text-center touch-manipulation ${
                         currentSubVal === false
                           ? 'bg-rose-600 text-white border-rose-500 shadow-lg shadow-rose-600/30 ring-2 ring-rose-500/40'
                           : 'bg-slate-950/70 text-slate-400 border-white/10 hover:border-rose-500/40 hover:text-rose-300'

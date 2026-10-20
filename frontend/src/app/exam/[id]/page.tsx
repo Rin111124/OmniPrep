@@ -12,7 +12,7 @@ import { saveMistakesFromResult } from '@/lib/mistakes';
 import { examStorageKey, readExamStorage, removeExamStorage, writeExamStorage } from '@/lib/examStorage';
 import { useAuth } from '@/context/AuthContext';
 import { Question, StudentAnswer, SubjectCode } from '@/types';
-import { ChevronLeft, ChevronRight, Loader2, BookMarked, Target, Clock, Send, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, BookMarked, Target, Clock, Send, AlertTriangle, LayoutGrid, X } from 'lucide-react';
 
 interface ExamPageProps {
   params: Promise<{ id: string }>;
@@ -53,6 +53,7 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
   const [isTutorOpen, setIsTutorOpen] = useState<boolean>(false);
   const [tutorQuestion, setTutorQuestion] = useState<Question | null>(null);
   const [tutorStudentAnswer, setTutorStudentAnswer] = useState<StudentAnswer | undefined>(undefined);
+  const [isMobilePaletteOpen, setIsMobilePaletteOpen] = useState<boolean>(false);
 
   useEffect(() => {
     answersRef.current = Array.from(answers.values());
@@ -322,34 +323,44 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
       )}
 
       {/* Sticky Exam Toolbar with Countdown and Submit Button */}
-      <div className="glass-panel border-b border-white/10 px-4 sm:px-8 py-3.5 sticky top-16 z-40 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div className="glass-panel border-b border-white/10 px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 sticky top-16 z-40 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-bold text-white">
-                  Đề thi: {subjectDisplayName}
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h1 className="text-sm sm:text-lg font-bold text-white truncate max-w-[120px] sm:max-w-none">
+                  {subjectDisplayName}
                 </h1>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  GDPT 2018
+                <span className="text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
+                  2025
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-[11px] text-slate-400 hidden sm:block">
                 Thời gian làm bài: 50 phút • 3 phần thi theo ma trận chuẩn
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {/* Mobile Question Palette Drawer Trigger */}
+            <button
+              onClick={() => setIsMobilePaletteOpen(true)}
+              className="lg:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-indigo-500/30 bg-slate-900/90 text-indigo-300 text-xs font-bold active:scale-95 transition-all"
+              title="Mở bảng câu hỏi"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{answers.size}/{questions.length}</span>
+            </button>
+
             {/* Countdown Clock */}
             <div
-              className={`flex items-center gap-2 px-3.5 py-1.5 sm:py-2 rounded-xl border font-mono text-xs sm:text-base font-bold transition-all ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl border font-mono text-xs sm:text-base font-bold transition-all ${
                 isUrgent
                   ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
                   : 'bg-slate-900/80 text-cyan-300 border-cyan-500/30'
               }`}
             >
-              <Clock className="w-4 h-4 text-cyan-400" />
+              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
               <span>
                 {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
               </span>
@@ -364,20 +375,21 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
             {/* NỘP BÀI & CHẤM ĐIỂM */}
             <button
               onClick={() => setShowSubmitModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-600/30 transition-all hover:scale-105 cursor-pointer"
+              className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-lg shadow-indigo-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
             >
-              <Send className="w-4 h-4" />
-              <span>Nộp bài & Chấm điểm</span>
+              <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Nộp bài & Chấm điểm</span>
+              <span className="sm:hidden">Nộp bài</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Main 2-Column Layout (Trái 75%: Nội dung câu hỏi | Phải 25%: Bảng điều hướng & Đồng hồ) */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* Main 2-Column Layout */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
           {/* Trái 75% (8-9 cols): Question Card and Next/Prev Navigation */}
-          <div className="lg:col-span-8 space-y-6">
+          <div className="lg:col-span-8 space-y-4 sm:space-y-6">
             {currentQuestion && (
               <QuestionCard
                 key={currentQuestion.id}
@@ -392,24 +404,26 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
             )}
 
             {/* Navigation Controls: Prev / Next */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between pt-2 gap-2">
               <button
                 disabled={currentIndex === 0}
                 onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-slate-900/80 border border-white/10 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                className="flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-slate-900/80 border border-white/10 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
                 <ChevronLeft className="w-4 h-4" />
                 <span>Câu trước</span>
               </button>
 
-              <div className="text-xs font-semibold text-slate-400">
-                Câu <strong className="text-white">{currentIndex + 1}</strong> trên {questions.length}
+              <div className="text-xs font-semibold text-slate-400 text-center">
+                <span className="hidden xs:inline">Câu </span>
+                <strong className="text-white">{currentIndex + 1}</strong>
+                <span> / {questions.length}</span>
               </div>
 
               <button
                 disabled={currentIndex === questions.length - 1}
                 onClick={() => setCurrentIndex(prev => Math.min(questions.length - 1, prev + 1))}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                className="flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
                 <span>Câu tiếp theo</span>
                 <ChevronRight className="w-4 h-4" />
@@ -417,8 +431,8 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
             </div>
           </div>
 
-          {/* Phải 25% (3-4 cols): Question Palette & Progress */}
-          <div className="lg:col-span-4">
+          {/* Desktop Right 25% (3-4 cols): Question Palette & Progress */}
+          <div className="hidden lg:block lg:col-span-4">
             <QuestionPalette
               questions={questions}
               currentQuestionIndex={currentIndex}
@@ -429,6 +443,38 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
           </div>
         </div>
       </main>
+
+      {/* Mobile Question Palette Bottom Sheet / Modal */}
+      {isMobilePaletteOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex flex-col justify-end bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full bg-slate-950 border-t border-white/15 rounded-t-3xl p-4 sm:p-5 shadow-2xl max-h-[82dvh] overflow-y-auto space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <LayoutGrid className="w-4 h-4 text-indigo-400" />
+                <h3 className="font-bold text-white text-sm">Bảng câu hỏi & Tiến độ</h3>
+              </div>
+              <button
+                onClick={() => setIsMobilePaletteOpen(false)}
+                className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white"
+                aria-label="Đóng"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <QuestionPalette
+              questions={questions}
+              currentQuestionIndex={currentIndex}
+              answers={answers}
+              flaggedQuestionIds={flaggedIds}
+              onSelectQuestion={(idx) => {
+                setCurrentIndex(idx);
+                setIsMobilePaletteOpen(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Modal before Submit */}
       {showSubmitModal && (

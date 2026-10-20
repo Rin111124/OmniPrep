@@ -36,10 +36,16 @@ export const SystemStatusModal: React.FC<SystemStatusModalProps> = ({ isOpen, on
     const startedAt = performance.now();
     try {
       const response = await fetch('/api/health', { cache: 'no-store' });
-      if (!response.ok) throw new Error('Backend chưa phản hồi trạng thái sức khỏe.');
-      const data: HealthResponse = await response.json();
-      setHealth(data);
-      setLatencyMs(Math.round(performance.now() - startedAt));
+      const data: HealthResponse = await response.json().catch(() => null);
+      if (data && data.status) {
+        setHealth(data);
+        setLatencyMs(Math.round(performance.now() - startedAt));
+        if (response.status === 503) {
+          setErrorMessage(data.database?.connected ? 'Gemini AI chưa được cấu hình.' : 'Cơ sở dữ liệu PostgreSQL chưa sẵn sàng.');
+        }
+      } else {
+        throw new Error('Backend chưa phản hồi trạng thái sức khỏe.');
+      }
     } catch {
       setHealth(null);
       setLatencyMs(null);

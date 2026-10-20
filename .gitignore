@@ -27,6 +27,12 @@ yarn-error.log*
 .env.*.local
 !*.example
 
+# Documentation
+docs/
+
+# Build artifacts & packages
+publish/
+
 # OS / Editor
 .DS_Store
 Thumbs.db

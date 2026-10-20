@@ -7,12 +7,14 @@ export async function GET() {
   if (!apiBase) return NextResponse.json({ status: 'Unavailable' }, { status: 503 });
 
   try {
-    const response = await fetch(`${apiBase.replace(/\/$/, '')}/health`, {
+    const response = await fetch(`${apiBase.replace(/\/$/, '')}/health/ready`, {
       cache: 'no-store',
       signal: AbortSignal.timeout(5000)
     });
-    if (!response.ok) return NextResponse.json({ status: 'Unavailable' }, { status: 503 });
-    const health = await response.json();
+    const health = await response.json().catch(() => null);
+    if (!health) {
+      return NextResponse.json({ status: 'Unavailable' }, { status: 503 });
+    }
     return NextResponse.json({
       status: health.status,
       timestamp: health.timestamp,
@@ -22,7 +24,10 @@ export async function GET() {
         model: health.gemini?.model,
         embeddingModel: health.gemini?.embeddingModel
       }
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    }, {
+      status: response.status,
+      headers: { 'Cache-Control': 'no-store' }
+    });
   } catch {
     return NextResponse.json({ status: 'Unavailable' }, { status: 503 });
   }

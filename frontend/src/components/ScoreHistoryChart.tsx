@@ -56,31 +56,31 @@ export const ScoreHistoryChart: React.FC<ScoreHistoryChartProps> = ({
   const targetY = getY(targetScore);
 
   return (
-    <div className="glass-panel rounded-3xl p-6 sm:p-7 border border-white/10 space-y-4 relative overflow-hidden">
+    <div className="glass-panel rounded-2xl sm:rounded-3xl p-4 sm:p-7 border border-white/10 space-y-4 relative overflow-hidden">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
             <TrendingUp className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
               Biểu Đồ Tiến Bộ Điểm Số
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                10 bài thi gần nhất
+                10 bài gần nhất
               </span>
             </h3>
             <p className="text-xs text-slate-400">
-              Mục tiêu điểm số của em: <strong className="text-amber-400">{targetScore.toFixed(1)}+</strong>
+              Mục tiêu điểm số: <strong className="text-amber-400">{targetScore.toFixed(1)}+</strong>
             </p>
           </div>
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs">
           <div className="flex items-center gap-1.5 text-slate-300 font-medium">
             <span className="w-3 h-0.5 bg-indigo-400 inline-block" />
-            <span>Điểm đạt được</span>
+            <span>Điểm đạt</span>
           </div>
           <div className="flex items-center gap-1.5 text-amber-400 font-medium">
             <span className="w-3 h-0.5 border-t border-dashed border-amber-400 inline-block" />
@@ -90,10 +90,10 @@ export const ScoreHistoryChart: React.FC<ScoreHistoryChartProps> = ({
       </div>
 
       {/* SVG Chart */}
-      <div className="relative w-full overflow-x-auto">
+      <div className="relative w-full overflow-x-auto pb-1">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full h-auto min-w-[500px]"
+          className="w-full h-auto min-w-[380px] sm:min-w-full touch-pan-x"
         >
           <defs>
             <linearGradient id="scoreAreaGradient" x1="0" y1="0" x2="0" y2="1">
@@ -169,8 +169,12 @@ export const ScoreHistoryChart: React.FC<ScoreHistoryChartProps> = ({
                 key={i}
                 onMouseEnter={() => setHoveredIdx(i)}
                 onMouseLeave={() => setHoveredIdx(null)}
-                className="cursor-pointer"
+                onClick={() => setHoveredIdx(prev => prev === i ? null : i)}
+                className="cursor-pointer touch-manipulation"
               >
+                {/* Invisible large touch target for mobile tapping */}
+                <circle cx={p.x} cy={p.y} r={16} fill="transparent" />
+
                 {/* Outer halo */}
                 <circle
                   cx={p.x}
@@ -199,12 +203,12 @@ export const ScoreHistoryChart: React.FC<ScoreHistoryChartProps> = ({
           })}
         </svg>
 
-        {/* Floating Tooltip Box when point hovered */}
+        {/* Floating Tooltip Box when point hovered or tapped */}
         {hoveredIdx !== null && points[hoveredIdx] && (
           <div
             className="absolute z-20 pointer-events-none -translate-x-1/2 bg-slate-900/95 border border-white/15 p-3 rounded-xl shadow-xl text-xs space-y-1 backdrop-blur-md transition-all"
             style={{
-              left: `${(points[hoveredIdx].x / width) * 100}%`,
+              left: `${Math.min(85, Math.max(15, (points[hoveredIdx].x / width) * 100))}%`,
               top: `${Math.max(10, points[hoveredIdx].y - 75)}px`
             }}
           >

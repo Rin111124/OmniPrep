@@ -18,7 +18,7 @@ services:
       - Cors__AllowedOrigins=${Cors__AllowedOrigins:-http://localhost:3000}
       - Frontend__Url=${Frontend__Url:-http://localhost:3000}
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health/ready || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
