@@ -88,11 +88,3 @@ OmniPrep hiện là MVP kỹ thuật. Tài khoản và quyền được xác th�
 - Các quyền `TEACHER`, dashboard, thống kê và tutor cần được xác nhận bằng staging trước khi công bố phạm vi sử dụng.
 
 Xem [lộ trình production readiness](docs/production-readiness-plan.md) để biết các điều kiện phát hành theo giai đoạn.
-
-
-
-
-
-
-
->>>>>>> 4ec6fe9 (first commit)

@@ -9,7 +9,7 @@
 -- ============================================================
 -- BƯỚC 1: Kích hoạt Extension pgvector (vector similarity search)
 -- ============================================================
-CREATE EXTENSION IF NOT EXISTS "pgvector";
+CREATE EXTENSION IF NOT EXISTS "vector";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================
@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS questions (
     distractor_analysis JSONB DEFAULT '{}'::JSONB,
 
     -- CHỐNG TRÙNG LẶP: Tầng 1 - SHA-256 Hash
-    content_hash        CHAR(64) NOT NULL,
+    content_hash        CHAR(64) NOT NULL DEFAULT '',
     -- CHỐNG TRÙNG LẶP: Tầng 2 - Vector 768 chiều (text-embedding-004)
     content_embedding   VECTOR(768),
 
@@ -168,6 +168,25 @@ CREATE TABLE IF NOT EXISTS questions (
 COMMENT ON TABLE questions IS 'Ngân hàng câu hỏi trung tâm với chống trùng lặp 2 tầng (SHA-256 + pgvector)';
 COMMENT ON COLUMN questions.content_hash IS 'SHA-256 của content để phát hiện trùng lặp chính xác (Tầng 1)';
 COMMENT ON COLUMN questions.content_embedding IS 'Vector 768 chiều từ text-embedding-004 để phát hiện câu hỏi xào nấu (Tầng 2)';
+
+-- Đảm bảo cột content_hash luôn có default và trigger tự động băm SHA-256
+ALTER TABLE questions ALTER COLUMN content_hash SET DEFAULT '';
+
+CREATE OR REPLACE FUNCTION set_question_content_hash()
+RETURNS TRIGGER AS 
+BEGIN
+    IF NEW.content_hash IS NULL OR LENGTH(TRIM(NEW.content_hash)) = 0 THEN
+        NEW.content_hash := encode(sha256(NEW.content::bytea), 'hex');
+    END IF;
+    RETURN NEW;
+END;
+ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_set_question_content_hash ON questions;
+CREATE TRIGGER trg_set_question_content_hash
+BEFORE INSERT OR UPDATE ON questions
+FOR EACH ROW
+EXECUTE FUNCTION set_question_content_hash();
 
 -- ============================================================
 -- BƯỚC 7: BẢNG EXAM_PAPERS - Đề thi gốc được nạp vào hệ thống

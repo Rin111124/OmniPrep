@@ -13,7 +13,7 @@
 -- ============================================================
 -- BƯỚC 1: Kích hoạt Extension pgvector (vector similarity search)
 -- ============================================================
-CREATE EXTENSION IF NOT EXISTS "pgvector";
+CREATE EXTENSION IF NOT EXISTS "vector";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================
@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS questions (
     distractor_analysis JSONB DEFAULT '{}'::JSONB,
 
     -- CHỐNG TRÙNG LẶP: Tầng 1 - SHA-256 Hash
-    content_hash        CHAR(64) NOT NULL,
+    content_hash        CHAR(64) NOT NULL DEFAULT '',
     -- CHỐNG TRÙNG LẶP: Tầng 2 - Vector 768 chiều (text-embedding-004)
     content_embedding   VECTOR(768),
 
@@ -172,6 +172,25 @@ CREATE TABLE IF NOT EXISTS questions (
 COMMENT ON TABLE questions IS 'Ngân hàng câu hỏi trung tâm với chống trùng lặp 2 tầng (SHA-256 + pgvector)';
 COMMENT ON COLUMN questions.content_hash IS 'SHA-256 của content để phát hiện trùng lặp chính xác (Tầng 1)';
 COMMENT ON COLUMN questions.content_embedding IS 'Vector 768 chiều từ text-embedding-004 để phát hiện câu hỏi xào nấu (Tầng 2)';
+
+-- Đảm bảo cột content_hash luôn có default và trigger tự động băm SHA-256
+ALTER TABLE questions ALTER COLUMN content_hash SET DEFAULT '';
+
+CREATE OR REPLACE FUNCTION set_question_content_hash()
+RETURNS TRIGGER AS 
+BEGIN
+    IF NEW.content_hash IS NULL OR LENGTH(TRIM(NEW.content_hash)) = 0 THEN
+        NEW.content_hash := encode(sha256(NEW.content::bytea), 'hex');
+    END IF;
+    RETURN NEW;
+END;
+ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_set_question_content_hash ON questions;
+CREATE TRIGGER trg_set_question_content_hash
+BEFORE INSERT OR UPDATE ON questions
+FOR EACH ROW
+EXECUTE FUNCTION set_question_content_hash();
 
 -- ============================================================
 -- BƯỚC 7: BẢNG EXAM_PAPERS - Đề thi gốc được nạp vào hệ thống
@@ -815,7 +834,7 @@ ON CONFLICT (name) DO NOTHING;
 -- PHẦN I: TRẮC NGHIỆM 4 PHƯƠNG ÁN (SingleChoice)
 INSERT INTO questions (
     id, subject_id, content, format, difficulty, topic, source_tags, first_seen_year,
-    answer_data, explanation, distractor_analysis, is_active
+    content_hash, answer_data, explanation, distractor_analysis, is_active
 ) VALUES
 (
     '00000000-0000-0000-0001-000000000001',
@@ -826,6 +845,7 @@ INSERT INTO questions (
     'Địa lý tự nhiên Việt Nam',
     ARRAY['Đề Tham khảo Bộ GD&ĐT 2025', 'Sở Bắc Ninh 2026'],
     2025,
+    'c36e336896383637482a9cc770467c6493482adea90137066240807e283ef95a',
     '{
         "options": {
             "A": "Có tổng bức xạ lớn và cân bằng bức xạ quanh năm luôn dương.",
@@ -852,6 +872,7 @@ INSERT INTO questions (
     'Kỹ năng đọc Atlat & Xử lý số liệu',
     ARRAY['Sở GD&ĐT Hà Nội 2025'],
     2025,
+    '7b443bb31f92462ba3cd5619031cb29242ae6f23b2b47633f7d3b4767a719fd9',
     '{
         "options": {
             "A": "Sông Cầu.",
@@ -878,6 +899,7 @@ INSERT INTO questions (
     'Địa lý các vùng kinh tế',
     ARRAY['Sở GD&ĐT Đà Nẵng 2025', 'Chuyên Lam Sơn 2025'],
     2025,
+    '9da3720d45f0c3e445c0bbf721f59e9992566f0bc87b86201d0b1cdcd40590ec',
     '{
         "options": {
             "A": "Tạo động lực chuyển dịch cơ cấu kinh tế và phát huy thế mạnh vượt trội của vùng.",
@@ -904,6 +926,7 @@ INSERT INTO questions (
     'Địa lý các ngành kinh tế',
     ARRAY['Chuyên ĐH Sư Phạm HN 2025'],
     2025,
+    '24cacc416d167ae1f7fdd03f41b44719622168ad2bad7532a6e44ace2ee9008c',
     '{
         "options": {
             "A": "Đẩy mạnh khâu chế biến sâu, xây dựng thương hiệu nông sản và mở rộng thị trường.",
@@ -926,7 +949,7 @@ ON CONFLICT (id) DO NOTHING;
 -- PHẦN II: ĐÚNG / SAI KÈM BẢNG SỐ LIỆU THỰC TẾ (TrueFalse)
 INSERT INTO questions (
     id, subject_id, content, format, difficulty, topic, source_tags, first_seen_year,
-    attached_table, answer_data, explanation, distractor_analysis, is_active
+    content_hash, attached_table, answer_data, explanation, distractor_analysis, is_active
 ) VALUES
 (
     '00000000-0000-0000-0002-000000000001',
@@ -938,6 +961,7 @@ Nhận định về sự biến động sản lượng và năng suất lúa c�
     'Kỹ năng đọc Atlat & Xử lý số liệu',
     ARRAY['Đề Tham khảo Bộ GD&ĐT 2025', 'Sở Bắc Ninh 2026'],
     2025,
+    'd57ac791bd9582a6968ffa22f9bc918b6668e5c14932581196f41d683d86b640',
     '{"title": "Diện tích và sản lượng lúa của nước ta giai đoạn 2018 - 2023", "unit": "Diện tích: nghìn ha | Sản lượng: nghìn tấn", "headers": ["Năm", "Diện tích (nghìn ha)", "Sản lượng (nghìn tấn)"], "rows": [["2018", "7570.4", "44046.0"], ["2020", "7279.0", "42759.0"], ["2022", "7106.6", "42672.0"], ["2023", "7120.0", "43500.0"]]}',
     '{
         "subQuestions": {
@@ -966,7 +990,7 @@ ON CONFLICT (id) DO NOTHING;
 -- PHẦN III: TRẢ LỜI NGẮN SỐ HỌC (ShortAnswer)
 INSERT INTO questions (
     id, subject_id, content, format, difficulty, topic, source_tags, first_seen_year,
-    answer_data, explanation, distractor_analysis, is_active
+    content_hash, answer_data, explanation, distractor_analysis, is_active
 ) VALUES
 (
     '00000000-0000-0000-0003-000000000001',
@@ -979,6 +1003,7 @@ Tính biên độ nhiệt độ năm của Hà Nội (làm tròn kết quả đ�
     'Địa lý tự nhiên Việt Nam',
     ARRAY['Đề minh họa 2025 Bộ GD&ĐT', 'Sở Nghệ An 2026'],
     2025,
+    'aca06e098ff30aa4bff3912b95336996cae4e7f890b6d7daaf53c6ff7479933a',
     '{
         "correctAnswer": "12.8",
         "acceptedAnswers": ["12.8", "12,8", "12.8°C"],
@@ -1001,6 +1026,7 @@ Tính biên độ nhiệt độ năm của Hà Nội (làm tròn kết quả đ�
     'Địa lý dân cư và đô thị hóa',
     ARRAY['Chuyên Phan Bội Châu 2025', 'Chuyên Vinh 2026'],
     2025,
+    '5cf3898f2810d4c875531ed8da303dcebaa78503ea05a2ce05ec41d6fc6fbc41',
     '{
         "correctAnswer": "38.1",
         "acceptedAnswers": ["38.1", "38,1", "38.1%"],
@@ -1021,7 +1047,7 @@ ON CONFLICT (id) DO NOTHING;
 -- -------------------------------------------------------------
 INSERT INTO questions (
     id, subject_id, content, format, difficulty, topic, source_tags, first_seen_year,
-    answer_data, explanation, distractor_analysis, is_active
+    content_hash, answer_data, explanation, distractor_analysis, is_active
 ) VALUES
 (
     '00000000-0000-0000-0004-000000000001',
@@ -1032,6 +1058,7 @@ INSERT INTO questions (
     'Lạm phát và thất nghiệp',
     ARRAY['Đề Tham Khảo Bộ GD&ĐT 2025', 'Chuyên Lam Sơn 2025'],
     2025,
+    'f5181344b071b2209d9dd435b1988c71da80a4405c11fb495be23bee5c4498e2',
     '{
         "options": {
             "A": "Lạm phát.",
@@ -1058,6 +1085,7 @@ INSERT INTO questions (
     'Nền kinh tế và các chủ thể kinh tế',
     ARRAY['Chuyên Lam Sơn 2025'],
     2025,
+    '1e1cb1585557af320728d61cf8ffbdb17b4a91171e6730e0acc032883207af25',
     '{
         "subQuestions": {
             "a": "Doanh nghiệp Hoàng Long chịu trách nhiệm vô hạn bằng toàn bộ tài sản của chủ doanh nghiệp tư nhân.",
@@ -1088,6 +1116,7 @@ INSERT INTO questions (
     'Thị trường, giá cả, cung cầu',
     ARRAY['Đề Sở GD&ĐT Hà Nội 2025'],
     2025,
+    '9c14a3e2a8246b9fa3cc2a45c11e364df8843e11f55a1a6c3d38f8ae21e22cc8',
     '{
         "correctAnswer": "40",
         "acceptedAnswers": ["40", "40 triệu", "40.0"],
@@ -1412,4 +1441,21 @@ CREATE POLICY user_mistakes_manage_own ON user_mistakes
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
+
+
+--- ============================================================
+--- MIGRATION: 010_secure_questions_rls.sql
+--- ============================================================
+
+-- 1. Xóa bỏ chính sách đọc công khai cũ cho phép bất kỳ ai đọc câu hỏi active
+DROP POLICY IF EXISTS "questions_public_read" ON questions;
+DROP POLICY IF EXISTS "questions_privileged_select" ON questions;
+
+-- 2. Chỉ cho phép Giảng viên (TEACHER) và Quản trị viên (ADMIN) đọc trực tiếp từ bảng questions
+CREATE POLICY "questions_privileged_select" ON questions
+    FOR SELECT USING (is_teacher_or_admin());
+
+COMMENT ON POLICY "questions_privileged_select" ON questions IS 
+    'Chỉ TEACHER và ADMIN mới được đọc trực tiếp từ bảng questions qua PostgREST. Học sinh phải làm bài qua .NET API.';
+
 

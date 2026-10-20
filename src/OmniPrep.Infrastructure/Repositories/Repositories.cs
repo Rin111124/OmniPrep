@@ -82,8 +82,9 @@ public sealed class QuestionRepository : IQuestionRepository
     }
 
     /// <summary>
-    /// Rút câu hỏi ngẫu nhiên theo format, LOẠI 100% câu đã làm đúng.
-    /// Tránh N+1: Load danh sách câu đã làm đúng trước, sau đó filter.
+    /// Rút câu hỏi ngẫu nhiên theo format, ưu tiên loại câu đã làm đúng.
+    /// Nếu không đủ số lượng câu chưa làm đúng, áp dụng Fallback tái sử dụng câu cũ
+    /// theo thứ tự thời gian xa nhất (Spaced Repetition) để tránh lỗi gián đoạn thi cử.
     /// </summary>
     public async Task<IReadOnlyList<Question>> DrawForExamAsync(
         Guid subjectId,
@@ -92,15 +93,21 @@ public sealed class QuestionRepository : IQuestionRepository
         int count,
         CancellationToken ct = default)
     {
-        // Load ID câu đã làm đúng của user (một query riêng biệt)
-        var correctQuestionIds = await _db.UserQuestionHistories
+        // 1. Thống kê câu đã làm đúng kèm thời điểm làm đúng gần nhất
+        var correctStats = await _db.UserQuestionHistories
             .Where(h => h.UserId == userId && h.Status == AnswerStatus.Correct)
-            .Select(h => h.QuestionId)
-            .Distinct()
+            .GroupBy(h => h.QuestionId)
+            .Select(g => new
+            {
+                QuestionId = g.Key,
+                LastCorrectAt = g.Max(h => h.AnsweredAt)
+            })
             .ToListAsync(ct);
 
-        // Rút câu ngẫu nhiên từ các câu chưa làm đúng
-        return await _db.Questions
+        var correctQuestionIds = correctStats.Select(s => s.QuestionId).ToHashSet();
+
+        // 2. Rút câu ngẫu nhiên từ các câu chưa làm hoặc đã làm sai
+        var selectedQuestions = await _db.Questions
             .Where(q => q.SubjectId == subjectId
                      && q.Format == format
                      && q.IsActive
@@ -109,6 +116,54 @@ public sealed class QuestionRepository : IQuestionRepository
             .OrderBy(_ => EF.Functions.Random())
             .Take(count)
             .ToListAsync(ct);
+
+        // 3. FALLBACK: Nếu số câu chưa làm đúng không đủ số lượng ma trận
+        if (selectedQuestions.Count < count)
+        {
+            var needed = count - selectedQuestions.Count;
+            var selectedIds = selectedQuestions.Select(q => q.Id).ToHashSet();
+
+            // Tái sử dụng các câu đã làm đúng cũ nhất (Spaced Repetition)
+            var recycledIds = correctStats
+                .Where(s => !selectedIds.Contains(s.QuestionId))
+                .OrderBy(s => s.LastCorrectAt)
+                .Select(s => s.QuestionId)
+                .Take(needed)
+                .ToList();
+
+            if (recycledIds.Count > 0)
+            {
+                var recycledQuestions = await _db.Questions
+                    .Where(q => recycledIds.Contains(q.Id)
+                             && q.SubjectId == subjectId
+                             && q.Format == format
+                             && q.IsActive
+                             && q.IsVerified)
+                    .ToListAsync(ct);
+
+                selectedQuestions.AddRange(recycledQuestions);
+            }
+
+            // Nếu vẫn còn thiếu (do ngân hàng câu hỏi tổng thể thiếu), bù tiếp các câu active còn lại
+            if (selectedQuestions.Count < count)
+            {
+                var currentIds = selectedQuestions.Select(q => q.Id).ToHashSet();
+                var remaining = count - selectedQuestions.Count;
+                var anyAvailable = await _db.Questions
+                    .Where(q => q.SubjectId == subjectId
+                             && q.Format == format
+                             && q.IsActive
+                             && q.IsVerified
+                             && !currentIds.Contains(q.Id))
+                    .OrderBy(_ => EF.Functions.Random())
+                    .Take(remaining)
+                    .ToListAsync(ct);
+
+                selectedQuestions.AddRange(anyAvailable);
+            }
+        }
+
+        return selectedQuestions;
     }
 
     public async Task AddAsync(Question question, CancellationToken ct = default)
