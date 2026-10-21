@@ -10,6 +10,7 @@ using OmniPrep.Domain.Entities;
 using OmniPrep.Domain.Enums;
 using OmniPrep.Domain.Interfaces;
 using OmniPrep.Infrastructure.Data;
+using OmniPrep.Infrastructure.Services;
 using static OmniPrep.Api.Endpoints.EndpointHelpers;
 
 namespace OmniPrep.Api.Endpoints;
@@ -24,7 +25,7 @@ public static class IngestionEndpoints
         var ingestion = group.MapGroup("/admin/ingest").WithTags("Admin - Ingestion").RequireAuthorization();
 
         /// <summary>
-        /// Bóc tách đề thi (hỗ trợ cả dán text/OCR trực tiếp hoặc upload file).
+        /// Bóc tách đề thi (hỗ trợ cả dán text trực tiếp hoặc tải file .txt/.pdf).
         /// </summary>
         ingestion.MapPost("/", async (
             IFormFile? file,
@@ -37,6 +38,7 @@ public static class IngestionEndpoints
             IExamPaperRepository paperRepo,
             ISubjectRepository subjectRepo,
             IIngestionService ingestionService,
+            IPdfDocumentExtractor pdfExtractor,
             CancellationToken ct) =>
         {
             if (!IsAdmin(user)) return Results.Forbid();
@@ -51,13 +53,38 @@ public static class IngestionEndpoints
 
             if (file is not null && file.Length > 0)
             {
-                if (!string.Equals(Path.GetExtension(file.FileName), ".txt", StringComparison.OrdinalIgnoreCase))
-                    return Results.BadRequest("Hiện chỉ hỗ trợ file .txt hoặc dán nội dung văn bản.");
+                var ext = Path.GetExtension(file.FileName);
+                if (!string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.BadRequest("Hệ thống hiện hỗ trợ file văn bản .txt hoặc tài liệu PDF (.pdf).");
+                }
                 if (file.Length > 10 * 1024 * 1024)
+                {
                     return Results.BadRequest("Kích thước file tối đa là 10 MB.");
+                }
                 title = file.FileName;
-                using var reader = new StreamReader(file.OpenReadStream());
-                contentToProcess = await reader.ReadToEndAsync(ct);
+
+                if (string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        contentToProcess = await pdfExtractor.ExtractTextAsync(file.OpenReadStream(), ct);
+                        if (string.IsNullOrWhiteSpace(contentToProcess))
+                        {
+                            return Results.BadRequest("File PDF không chứa lớp văn bản (text layer) hoặc đã bị khóa/scan ảnh không có text.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        return Results.BadRequest($"Không thể trích xuất văn bản từ file PDF: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    using var reader = new StreamReader(file.OpenReadStream());
+                    contentToProcess = await reader.ReadToEndAsync(ct);
+                }
             }
             else if (!string.IsNullOrWhiteSpace(rawContent))
             {
@@ -65,7 +92,7 @@ public static class IngestionEndpoints
             }
             else
             {
-                return Results.BadRequest("Vui lòng tải lên file đề thi hoặc dán nội dung văn bản rawContent.");
+                return Results.BadRequest("Vui lòng tải lên file đề thi (.txt/.pdf) hoặc dán nội dung văn bản rawContent.");
             }
 
             var fileHash = Convert.ToHexString(
@@ -129,6 +156,9 @@ public static class IngestionEndpoints
                     TotalNew = result.TotalNew,
                     TotalMerged = result.TotalMerged,
                     TotalFailed = result.TotalFailed,
+                    Part1Count = result.Part1Count,
+                    Part2Count = result.Part2Count,
+                    Part3Count = result.Part3Count,
                     Errors = result.Errors,
                     Message = $"Bóc tách hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi."
                 });
@@ -143,6 +173,65 @@ public static class IngestionEndpoints
                     statusCode: StatusCodes.Status500InternalServerError);
             }
         }).WithName("IngestExamPaper").DisableAntiforgery();
+
+        /// <summary>
+        /// Danh sách tài liệu đề thi đã nạp phục vụ đối chiếu nguồn gốc (Mục 8 & 10 Lộ trình)
+        /// </summary>
+        ingestion.MapGet("/papers", async (
+            ClaimsPrincipal user,
+            OmniPrepDbContext db,
+            CancellationToken ct) =>
+        {
+            if (!IsTeacherOrAdmin(user)) return Results.Forbid();
+            var papers = await db.ExamPapers.AsNoTracking()
+                .OrderByDescending(p => p.SubmittedAt)
+                .Take(50)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Title,
+                    Status = p.Status.ToString(),
+                    p.SubmittedAt,
+                    SubjectCode = p.Subject.Code.ToString(),
+                    SubjectName = p.Subject.Name,
+                    SourceName = p.Source != null ? p.Source.Name : string.Empty,
+                    p.ExamYear,
+                    RawLength = p.RawContent != null ? p.RawContent.Length : 0,
+                    RawPreview = p.RawContent != null && p.RawContent.Length > 200 ? p.RawContent.Substring(0, 200) + "..." : (p.RawContent ?? string.Empty)
+                })
+                .ToListAsync(ct);
+            return Results.Ok(papers);
+        }).WithName("ListIngestedPapers");
+
+        /// <summary>
+        /// Chi tiết đề thi gốc để xem và đối chiếu từng câu hỏi (Source Provenance Inspection)
+        /// </summary>
+        ingestion.MapGet("/papers/{id:guid}", async (
+            Guid id,
+            ClaimsPrincipal user,
+            OmniPrepDbContext db,
+            CancellationToken ct) =>
+        {
+            if (!IsTeacherOrAdmin(user)) return Results.Forbid();
+            var paper = await db.ExamPapers.AsNoTracking()
+                .Include(p => p.Subject)
+                .Include(p => p.Source)
+                .FirstOrDefaultAsync(p => p.Id == id, ct);
+            if (paper is null) return Results.NotFound();
+
+            return Results.Ok(new
+            {
+                paper.Id,
+                paper.Title,
+                Status = paper.Status.ToString(),
+                paper.SubmittedAt,
+                SubjectCode = paper.Subject.Code.ToString(),
+                SubjectName = paper.Subject.Name,
+                SourceName = paper.Source?.Name ?? string.Empty,
+                paper.ExamYear,
+                paper.RawContent
+            });
+        }).WithName("GetIngestedPaperDetails");
 
         return group;
     }

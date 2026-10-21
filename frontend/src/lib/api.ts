@@ -542,7 +542,11 @@ export async function submitExamForIngestion(payload: IngestionPayload): Promise
   formData.append('SubjectCode', backendSubjectCodes[payload.subjectCode]);
   formData.append('SourceName', payload.sourceName);
   if (payload.examYear) formData.append('ExamYear', payload.examYear.toString());
-  formData.append('RawContent', payload.rawContent);
+  if (payload.file) {
+    formData.append('file', payload.file, payload.file.name);
+  } else if (payload.rawContent) {
+    formData.append('rawContent', payload.rawContent);
+  }
   const res = await backendFetch('/admin/ingest', { method: 'POST', body: formData });
   return await res.json();
 }
@@ -689,6 +693,30 @@ export async function deleteUserData(): Promise<{ message: string }> {
   const response = await backendFetch('/users/me', {
     method: 'DELETE'
   });
+  return response.json();
+}
+
+export interface IngestedPaper {
+  id: string;
+  title: string;
+  status: string;
+  submittedAt: string;
+  subjectCode: string;
+  subjectName: string;
+  sourceName: string;
+  examYear?: number | null;
+  rawLength: number;
+  rawPreview: string;
+  rawContent?: string;
+}
+
+export async function getIngestedPapers(): Promise<IngestedPaper[]> {
+  const response = await backendFetch('/admin/ingest/papers');
+  return response.json();
+}
+
+export async function getIngestedPaperDetails(paperId: string): Promise<IngestedPaper> {
+  const response = await backendFetch(`/admin/ingest/papers/${encodeURIComponent(paperId)}`);
   return response.json();
 }
 

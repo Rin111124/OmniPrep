@@ -13,7 +13,10 @@ import {
   reviewQuestion,
   submitExamForIngestion,
   updatePendingQuestion,
-  verifyAllQuestions
+  verifyAllQuestions,
+  getIngestedPapers,
+  getIngestedPaperDetails,
+  IngestedPaper
 } from '@/lib/api';
 import { IngestionStatusResponse, SubjectCode } from '@/types';
 import {
@@ -26,7 +29,12 @@ import {
   FileText,
   RefreshCw,
   CheckCheck,
-  Sparkles
+  Sparkles,
+  Eye,
+  Search,
+  Layers,
+  BookOpen,
+  AlertTriangle
 } from 'lucide-react';
 
 const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
@@ -42,10 +50,12 @@ const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
 
 export default function AdminPage() {
   const { role, isLoading: authLoading } = useAuth();
+  const [activeTab, setActiveTab] = useState<'questions' | 'provenance'>('questions');
   const [subjectCode, setSubjectCode] = useState<SubjectCode>('GEOGRAPHY');
   const [sourceName, setSourceName] = useState('');
   const [examYear, setExamYear] = useState('');
   const [rawContent, setRawContent] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<IngestionStatusResponse | null>(null);
@@ -57,6 +67,13 @@ export default function AdminPage() {
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [isVerifyingAll, setIsVerifyingAll] = useState(false);
   const [verifyAllSuccess, setVerifyAllSuccess] = useState('');
+
+  // Source Provenance / Ingested papers state
+  const [ingestedPapers, setIngestedPapers] = useState<IngestedPaper[]>([]);
+  const [selectedPaperDetails, setSelectedPaperDetails] = useState<IngestedPaper | null>(null);
+  const [isLoadingPapers, setIsLoadingPapers] = useState(false);
+  const [paperSearch, setPaperSearch] = useState('');
+  const [inspectingPaperId, setInspectingPaperId] = useState<string | null>(null);
 
   // Moderation stats
   const [stats, setStats] = useState<ModerationStats | null>(null);
@@ -201,6 +218,30 @@ export default function AdminPage() {
     }
   }
 
+  const loadIngestedPapers = useCallback(async () => {
+    setIsLoadingPapers(true);
+    try {
+      const papers = await getIngestedPapers();
+      setIngestedPapers(papers);
+    } catch {
+      // Ignored
+    } finally {
+      setIsLoadingPapers(false);
+    }
+  }, []);
+
+  async function handleInspectPaper(paperId: string) {
+    setInspectingPaperId(paperId);
+    try {
+      const details = await getIngestedPaperDetails(paperId);
+      setSelectedPaperDetails(details);
+    } catch (cause) {
+      alert(cause instanceof Error ? cause.message : 'Không thể tải chi tiết văn bản đề gốc.');
+    } finally {
+      setInspectingPaperId(null);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isSubmitting) return;
@@ -212,11 +253,14 @@ export default function AdminPage() {
         subjectCode,
         sourceName: sourceName.trim(),
         examYear: examYear ? Number(examYear) : undefined,
-        rawContent: rawContent.trim()
+        rawContent: rawContent.trim(),
+        file: selectedFile || undefined
       });
       setResult(response);
       setRawContent('');
+      setSelectedFile(null);
       void refreshPending();
+      void loadIngestedPapers();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Không thể gửi tài liệu vào hàng đợi.');
     } finally {
@@ -226,22 +270,34 @@ export default function AdminPage() {
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.txt')) {
-      setError('Hiện chỉ hỗ trợ file .txt. OCR cho PDF và ảnh chưa được triển khai.');
-      event.target.value = '';
+    if (!file) {
+      setSelectedFile(null);
       return;
     }
-    if (file.size > 2 * 1024 * 1024) {
-      setError('File vượt quá giới hạn 2 MB.');
+    const isTxt = file.name.toLowerCase().endsWith('.txt');
+    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    if (!isTxt && !isPdf) {
+      setError('Hệ thống hỗ trợ file .txt hoặc .pdf (tối đa 10 MB).');
       event.target.value = '';
+      setSelectedFile(null);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File vượt quá giới hạn 10 MB.');
+      event.target.value = '';
+      setSelectedFile(null);
       return;
     }
     setError('');
-    const text = await file.text();
-    setRawContent(text);
+    setSelectedFile(file);
     if (!sourceName.trim()) {
       setSourceName(file.name.replace(/\.[^/.]+$/, ''));
+    }
+    if (isTxt) {
+      const text = await file.text();
+      setRawContent(text);
+    } else {
+      setRawContent(`[Tập tin PDF đính kèm: ${file.name} - ${(file.size / 1024).toFixed(1)} KB. Máy chủ sẽ bóc tách văn bản qua PdfPig Engine]`);
     }
   }
 
@@ -327,158 +383,437 @@ export default function AdminPage() {
               </div>
 
               <label className="block text-sm text-slate-300">
-                Chọn file văn bản .txt (tối đa 2 MB)
-                <input type="file" accept=".txt,text/plain" onChange={handleFileChange} className="mt-2 block w-full text-sm text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:font-semibold file:text-white" />
+                Chọn file đề thi (.txt hoặc .pdf, tối đa 10 MB)
+                <input
+                  type="file"
+                  accept=".txt,.pdf,text/plain,application/pdf"
+                  onChange={handleFileChange}
+                  className="mt-2 block w-full text-sm text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:font-semibold file:text-white hover:file:bg-indigo-500"
+                />
+                {selectedFile && (
+                  <p className="mt-1.5 text-xs text-indigo-300 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Đã chọn: <strong className="text-white">{selectedFile.name}</strong> ({(selectedFile.size / 1024).toFixed(1)} KB)</span>
+                  </p>
+                )}
               </label>
 
               <label className="block text-sm text-slate-300">
-                Hoặc dán nội dung đề
-                <textarea required value={rawContent} onChange={event => setRawContent(event.target.value)} rows={10} maxLength={2 * 1024 * 1024} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 p-3 font-mono text-xs text-slate-100" />
+                Hoặc dán nội dung đề văn bản
+                <textarea
+                  required={!selectedFile}
+                  value={rawContent}
+                  onChange={event => setRawContent(event.target.value)}
+                  rows={8}
+                  maxLength={2 * 1024 * 1024}
+                  placeholder="Dán nội dung đề thi ở đây (hoặc chọn file PDF / TXT ở trên)..."
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 p-3 font-mono text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/50"
+                />
               </label>
 
               {error && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-sm text-rose-200">{error}</p>}
               {result && (
-                <div role="status" className="rounded-2xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-sm text-emerald-200 space-y-1.5 shadow-lg">
+                <div role="status" className="rounded-2xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-sm text-emerald-200 space-y-3 shadow-lg">
                   <div className="flex items-center gap-2 font-bold text-emerald-400">
-                    <Sparkles className="w-4 h-4" />
-                    <span>Bóc tách đề thi thành công!</span>
+                    <Sparkles className="w-5 h-5" />
+                    <span>{result.message || 'Bóc tách đề thi thành công!'}</span>
                   </div>
-                  <p className="text-xs text-slate-300">
-                    Đã trích xuất <strong className="text-white font-bold">{result.totalExtracted || 0}</strong> câu hỏi:{' '}
-                    <span className="text-emerald-400 font-bold">{result.totalNew || 0} câu mới</span> đã được nạp vào hàng chờ duyệt,{' '}
-                    <span className="text-amber-300">{result.totalMerged || 0} câu trùng lặp</span> được tự động gộp nguồn.
-                    {result.totalFailed ? <span className="text-rose-400"> ({result.totalFailed} câu lỗi)</span> : ''}
-                  </p>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-black/30 rounded-xl p-2.5 border border-white/5">
+                      <span className="text-slate-400 block text-[11px]">Tổng trích xuất</span>
+                      <span className="text-base font-black text-white font-mono">{result.totalExtracted || 0}</span>
+                    </div>
+                    <div className="bg-black/30 rounded-xl p-2.5 border border-emerald-500/20">
+                      <span className="text-emerald-400 block text-[11px]">Câu mới hợp lệ</span>
+                      <span className="text-base font-black text-emerald-300 font-mono">{result.totalNew || 0}</span>
+                    </div>
+                    <div className="bg-black/30 rounded-xl p-2.5 border border-amber-500/20">
+                      <span className="text-amber-400 block text-[11px]">Câu trùng lặp (Gộp)</span>
+                      <span className="text-base font-black text-amber-300 font-mono">{result.totalMerged || 0}</span>
+                    </div>
+                    <div className="bg-black/30 rounded-xl p-2.5 border border-rose-500/20">
+                      <span className="text-rose-400 block text-[11px]">Lỗi kiểm định</span>
+                      <span className="text-base font-black text-rose-300 font-mono">{result.totalFailed || 0}</span>
+                    </div>
+                  </div>
+
+                  {/* Format Breakdown (P0 Roadmap) */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-white/10 text-xs">
+                    <span className="text-slate-400 font-semibold">Cấu trúc đề 2025:</span>
+                    <span className="rounded-lg bg-indigo-500/20 px-2.5 py-1 text-indigo-300 font-medium border border-indigo-500/30">
+                      Phần I (MCQ): <strong>{result.part1Count ?? 0}</strong>
+                    </span>
+                    <span className="rounded-lg bg-purple-500/20 px-2.5 py-1 text-purple-300 font-medium border border-purple-500/30">
+                      Phần II (Đúng/Sai): <strong>{result.part2Count ?? 0}</strong>
+                    </span>
+                    <span className="rounded-lg bg-cyan-500/20 px-2.5 py-1 text-cyan-300 font-medium border border-cyan-500/30">
+                      Phần III (Điền số): <strong>{result.part3Count ?? 0}</strong>
+                    </span>
+                  </div>
+
+                  {/* Validation Errors Breakdown */}
+                  {result.errors && result.errors.length > 0 && (
+                    <details className="mt-2 text-xs bg-rose-950/40 border border-rose-500/30 rounded-xl p-3 text-rose-200">
+                      <summary className="cursor-pointer font-bold flex items-center gap-1.5 text-rose-300">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>Chi tiết {result.errors.length} cảnh báo / lỗi định dạng câu hỏi</span>
+                      </summary>
+                      <ul className="mt-2 space-y-1 list-disc list-inside font-mono text-[11px] text-rose-300/90 max-h-40 overflow-y-auto">
+                        {result.errors.map((err, idx) => (
+                          <li key={idx}>{err}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
               )}
 
-              <button disabled={isSubmitting || !rawContent.trim() || !sourceName.trim()} className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-50 transition-all hover:scale-[1.01] active:scale-[0.99]">
+              <button
+                disabled={isSubmitting || (!rawContent.trim() && !selectedFile) || !sourceName.trim()}
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-50 transition-all hover:scale-[1.01] active:scale-[0.99]"
+              >
                 <Sparkles className="w-4 h-4 text-indigo-300" />
-                <span>{isSubmitting ? 'AI đang bóc tách & nạp đề thi...' : 'Bóc tách & Nạp đề thi ngay'}</span>
+                <span>{isSubmitting ? 'Hệ thống đang bóc tách & nạp đề thi...' : 'Bóc tách & Nạp đề thi ngay'}</span>
               </button>
             </form>
           )}
 
-          <section className="space-y-4">
-            <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-black">Hàng chờ duyệt câu hỏi ({pendingQuestions.length})</h2>
-                <p className="mt-1 text-sm text-slate-400">Hiệu đính, kiểm tra đáp án và xuất bản vào ngân hàng đề thi.</p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {pendingQuestions.length > 0 && (
-                  <button
-                    onClick={handleVerifyAll}
-                    disabled={isVerifyingAll || isLoadingQuestions}
-                    className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-950/40 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    <CheckCheck className="w-4 h-4" />
-                    <span>{isVerifyingAll ? 'Đang duyệt tất cả…' : `Chấp nhận toàn bộ (${pendingQuestions.length} câu)`}</span>
-                  </button>
-                )}
-                <button onClick={() => void refreshPending()} disabled={isLoadingQuestions} className="flex items-center gap-1.5 rounded-xl border border-white/10 px-4 py-2 text-sm disabled:opacity-50 hover:bg-white/5 transition-colors">
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingQuestions ? 'animate-spin' : ''}`} />
-                  <span>{isLoadingQuestions ? 'Đang tải…' : 'Tải lại'}</span>
-                </button>
-              </div>
-            </header>
+          {/* Tab Navigation */}
+          <div className="flex items-center gap-2 border-b border-white/10 pb-1">
+            <button
+              onClick={() => setActiveTab('questions')}
+              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-bold transition-all ${
+                activeTab === 'questions'
+                  ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10 rounded-t-xl'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Hàng chờ duyệt câu hỏi</span>
+              <span className="ml-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-mono text-slate-300">
+                {pendingQuestions.length}
+              </span>
+            </button>
 
-            {verifyAllSuccess && (
-              <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-sm text-emerald-200 flex items-center justify-between gap-2 shadow-lg">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <span>{verifyAllSuccess}</span>
+            <button
+              onClick={() => {
+                setActiveTab('provenance');
+                if (ingestedPapers.length === 0) {
+                  void loadIngestedPapers();
+                }
+              }}
+              className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-bold transition-all ${
+                activeTab === 'provenance'
+                  ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10 rounded-t-xl'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>Đối chiếu đề gốc & Nguồn tài liệu</span>
+              {ingestedPapers.length > 0 && (
+                <span className="ml-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-mono text-slate-300">
+                  {ingestedPapers.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {activeTab === 'questions' && (
+            <section className="space-y-4">
+              <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-black">Hàng chờ duyệt câu hỏi ({pendingQuestions.length})</h2>
+                  <p className="mt-1 text-sm text-slate-400">Hiệu đính, kiểm tra đáp án và xuất bản vào ngân hàng đề thi.</p>
                 </div>
-                <button onClick={() => setVerifyAllSuccess('')} className="text-xs text-slate-400 hover:text-white px-2 py-1">Đóng</button>
-              </div>
-            )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {pendingQuestions.length > 0 && (
+                    <button
+                      onClick={handleVerifyAll}
+                      disabled={isVerifyingAll || isLoadingQuestions}
+                      className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-950/40 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      <CheckCheck className="w-4 h-4" />
+                      <span>{isVerifyingAll ? 'Đang duyệt tất cả…' : `Chấp nhận toàn bộ (${pendingQuestions.length} câu)`}</span>
+                    </button>
+                  )}
+                  <button onClick={() => void refreshPending()} disabled={isLoadingQuestions} className="flex items-center gap-1.5 rounded-xl border border-white/10 px-4 py-2 text-sm disabled:opacity-50 hover:bg-white/5 transition-colors">
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingQuestions ? 'animate-spin' : ''}`} />
+                    <span>{isLoadingQuestions ? 'Đang tải…' : 'Tải lại'}</span>
+                  </button>
+                </div>
+              </header>
 
-            {reviewError && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-sm text-rose-200">{reviewError}</p>}
-            {isLoadingQuestions && pendingQuestions.length === 0 && <p className="text-sm text-slate-400">Đang tải hàng chờ duyệt…</p>}
-            {!isLoadingQuestions && pendingQuestions.length === 0 && <p className="rounded-2xl border border-white/10 p-5 text-sm text-slate-400">Không có câu hỏi đang chờ duyệt.</p>}
-
-            {pendingQuestions.map(question => (
-              <article key={question.id} className="space-y-4 rounded-2xl border border-white/10 bg-slate-950/70 p-5 shadow-lg">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-2">
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
-                    <span className="font-bold text-indigo-300">{question.subjectName}</span>
-                    <span>·</span>
-                    <span>{question.topic}</span>
-                    <span>·</span>
-                    <span className="font-mono text-slate-300">{question.format}</span>
-                    <span>·</span>
-                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-amber-300">{question.difficulty}</span>
+              {verifyAllSuccess && (
+                <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-sm text-emerald-200 flex items-center justify-between gap-2 shadow-lg">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <span>{verifyAllSuccess}</span>
                   </div>
-
-                  <button
-                    onClick={() => handleOpenEdit(question)}
-                    className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>Sửa câu hỏi</span>
-                  </button>
+                  <button onClick={() => setVerifyAllSuccess('')} className="text-xs text-slate-400 hover:text-white px-2 py-1">Đóng</button>
                 </div>
+              )}
 
-                <div className="whitespace-pre-wrap text-sm text-white leading-relaxed">{question.content}</div>
+              {reviewError && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-sm text-rose-200">{reviewError}</p>}
+              {isLoadingQuestions && pendingQuestions.length === 0 && <p className="text-sm text-slate-400">Đang tải hàng chờ duyệt…</p>}
+              {!isLoadingQuestions && pendingQuestions.length === 0 && <p className="rounded-2xl border border-white/10 p-5 text-sm text-slate-400">Không có câu hỏi đang chờ duyệt.</p>}
 
-                {question.attachedTable && (
-                  <pre className="overflow-auto rounded-xl bg-black/40 p-3 font-mono text-xs text-slate-300 border border-white/5">{question.attachedTable}</pre>
-                )}
-
-                <details className="text-sm text-slate-300">
-                  <summary className="cursor-pointer font-medium text-slate-400 hover:text-white">Xem chi tiết đáp án & lời giải</summary>
-                  <pre className="mt-2 overflow-auto rounded-xl bg-black/40 p-3 text-xs border border-white/5">{JSON.stringify(question.answerData, null, 2)}</pre>
-                  {question.explanation && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-300 bg-slate-900/40 p-2.5 rounded-lg border border-white/5">{question.explanation}</p>}
-                </details>
-
-                {question.imageUrls?.map((url, index) => (
-                  <Image key={`${question.id}-${index}`} src={url} alt={`Hình minh họa ${index + 1}`} width={1024} height={768} unoptimized className="max-h-80 w-auto rounded-xl object-contain" />
-                ))}
-
-                <p className="text-xs text-slate-500">Nguồn: {question.sourceTags?.join(', ') || 'Chưa có thông tin nguồn'}</p>
-
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-white/5">
-                  <button
-                    disabled={reviewingId !== null}
-                    onClick={() => void handleReview(question.id, 'verify')}
-                    className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50 transition-colors shrink-0"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{reviewingId === question.id ? 'Đang lưu…' : 'Duyệt & Xuất bản'}</span>
-                  </button>
-
-                  <div className="flex items-center gap-2 flex-1">
-                    <input
-                      value={reviewNotes[question.id] || ''}
-                      onChange={event => setReviewNotes(current => ({ ...current, [question.id]: event.target.value }))}
-                      maxLength={1000}
-                      placeholder="Lý do từ chối (bắt buộc khi từ chối)"
-                      className="w-full flex-1 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs"
-                    />
+              {pendingQuestions.map(question => (
+                <article key={question.id} className="space-y-4 rounded-2xl border border-white/10 bg-slate-950/70 p-5 shadow-lg">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-2">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                      <span className="font-bold text-indigo-300">{question.subjectName}</span>
+                      <span>·</span>
+                      <span>{question.topic}</span>
+                      <span>·</span>
+                      <span className="font-mono text-slate-300">{question.format}</span>
+                      <span>·</span>
+                      <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-amber-300">{question.difficulty}</span>
+                    </div>
 
                     <button
-                      disabled={reviewingId !== null || !reviewNotes[question.id]?.trim()}
-                      onClick={() => void handleReview(question.id, 'reject')}
-                      className="flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/40 px-3.5 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-50 transition-colors shrink-0"
+                      onClick={() => handleOpenEdit(question)}
+                      className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20"
                     >
-                      <XCircle className="w-3.5 h-3.5" />
-                      <span>Từ chối</span>
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Sửa câu hỏi</span>
                     </button>
                   </div>
-                </div>
-              </article>
-            ))}
 
-            {hasMoreQuestions && (
-              <button
-                onClick={() => void refreshPending(pendingQuestions.length)}
-                disabled={isLoadingQuestions}
-                className="w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
-              >
-                {isLoadingQuestions ? 'Đang tải…' : 'Tải thêm câu hỏi'}
-              </button>
-            )}
-          </section>
+                  <div className="whitespace-pre-wrap text-sm text-white leading-relaxed">{question.content}</div>
+
+                  {question.attachedTable && (
+                    <pre className="overflow-auto rounded-xl bg-black/40 p-3 font-mono text-xs text-slate-300 border border-white/5">{question.attachedTable}</pre>
+                  )}
+
+                  <details className="text-sm text-slate-300">
+                    <summary className="cursor-pointer font-medium text-slate-400 hover:text-white">Xem chi tiết đáp án & lời giải</summary>
+                    <pre className="mt-2 overflow-auto rounded-xl bg-black/40 p-3 text-xs border border-white/5">{JSON.stringify(question.answerData, null, 2)}</pre>
+                    {question.explanation && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-300 bg-slate-900/40 p-2.5 rounded-lg border border-white/5">{question.explanation}</p>}
+                  </details>
+
+                  {question.imageUrls?.map((url, index) => (
+                    <Image key={`${question.id}-${index}`} src={url} alt={`Hình minh họa ${index + 1}`} width={1024} height={768} unoptimized className="max-h-80 w-auto rounded-xl object-contain" />
+                  ))}
+
+                  <p className="text-xs text-slate-500">Nguồn: {question.sourceTags?.join(', ') || 'Chưa có thông tin nguồn'}</p>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-white/5">
+                    <button
+                      disabled={reviewingId !== null}
+                      onClick={() => void handleReview(question.id, 'verify')}
+                      className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50 transition-colors shrink-0"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>{reviewingId === question.id ? 'Đang lưu…' : 'Duyệt & Xuất bản'}</span>
+                    </button>
+
+                    <div className="flex items-center gap-2 flex-1">
+                      <input
+                        value={reviewNotes[question.id] || ''}
+                        onChange={event => setReviewNotes(current => ({ ...current, [question.id]: event.target.value }))}
+                        maxLength={1000}
+                        placeholder="Lý do từ chối (bắt buộc khi từ chối)"
+                        className="w-full flex-1 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs"
+                      />
+
+                      <button
+                        disabled={reviewingId !== null || !reviewNotes[question.id]?.trim()}
+                        onClick={() => void handleReview(question.id, 'reject')}
+                        className="flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/40 px-3.5 py-2 text-xs font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-50 transition-colors shrink-0"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Từ chối</span>
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+
+              {hasMoreQuestions && (
+                <button
+                  onClick={() => void refreshPending(pendingQuestions.length)}
+                  disabled={isLoadingQuestions}
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm font-semibold text-slate-300 hover:bg-white/5 disabled:opacity-50"
+                >
+                  {isLoadingQuestions ? 'Đang tải…' : 'Tải thêm câu hỏi'}
+                </button>
+              )}
+            </section>
+          )}
+
+          {/* Tab 2: Provenance & Raw Ingested Papers */}
+          {activeTab === 'provenance' && (
+            <section className="space-y-4">
+              <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-black">Đối chiếu nguồn tài liệu & Văn bản gốc</h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Truy vết nguồn gốc từng đề thi, kiểm tra lại nội dung thô trước khi bóc tách.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Tìm theo nguồn đề / môn..."
+                      value={paperSearch}
+                      onChange={e => setPaperSearch(e.target.value)}
+                      className="pl-9 pr-3 py-1.5 rounded-xl border border-white/10 bg-slate-900 text-xs text-white placeholder:text-slate-500 w-64"
+                    />
+                  </div>
+                  <button
+                    onClick={() => void loadIngestedPapers()}
+                    disabled={isLoadingPapers}
+                    className="flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-1.5 text-xs disabled:opacity-50 hover:bg-white/5 transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPapers ? 'animate-spin' : ''}`} />
+                    <span>Tải lại</span>
+                  </button>
+                </div>
+              </header>
+
+              {isLoadingPapers && ingestedPapers.length === 0 && (
+                <p className="text-sm text-slate-400">Đang tải danh sách tài liệu đề thi…</p>
+              )}
+
+              {!isLoadingPapers && ingestedPapers.length === 0 && (
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-8 text-center text-slate-400 space-y-2">
+                  <BookOpen className="w-8 h-8 mx-auto text-slate-500" />
+                  <p className="font-semibold">Chưa có đề thi nào trong danh mục đối chiếu.</p>
+                  <p className="text-xs">Hãy nạp một file .pdf hoặc .txt ở trên để bắt đầu bóc tách và lưu vết nguồn gốc.</p>
+                </div>
+              )}
+
+              {ingestedPapers.length > 0 && (
+                <div className="overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="border-b border-white/10 bg-white/5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      <tr>
+                        <th className="px-4 py-3">Tên đề / Nguồn</th>
+                        <th className="px-4 py-3">Môn học</th>
+                        <th className="px-4 py-3">Năm</th>
+                        <th className="px-4 py-3">Trạng thái</th>
+                        <th className="px-4 py-3">Dung lượng gốc</th>
+                        <th className="px-4 py-3">Thời gian nạp</th>
+                        <th className="px-4 py-3 text-right">Đối chiếu</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {ingestedPapers
+                        .filter(p =>
+                          paperSearch
+                            ? p.sourceName.toLowerCase().includes(paperSearch.toLowerCase()) ||
+                              p.subjectCode.toLowerCase().includes(paperSearch.toLowerCase())
+                            : true
+                        )
+                        .map(paper => (
+                          <tr key={paper.id} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="px-4 py-3.5 font-semibold text-white">
+                              {paper.sourceName}
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <span className="font-mono text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                                {paper.subjectCode}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5 font-mono text-slate-400">
+                              {paper.examYear || '—'}
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                paper.status === 'COMPLETED'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : paper.status === 'FAILED'
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              }`}>
+                                {paper.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5 font-mono text-slate-300">
+                              {paper.rawLength ? `${(paper.rawLength / 1024).toFixed(1)} KB` : '—'}
+                            </td>
+                            <td className="px-4 py-3.5 text-slate-400 text-[11px]">
+                              {new Date(paper.submittedAt).toLocaleString('vi-VN')}
+                            </td>
+                            <td className="px-4 py-3.5 text-right">
+                              <button
+                                onClick={() => void handleInspectPaper(paper.id)}
+                                disabled={inspectingPaperId === paper.id}
+                                className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 px-2.5 py-1 text-xs font-semibold text-indigo-300 transition-colors disabled:opacity-50"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>{inspectingPaperId === paper.id ? 'Đang đọc…' : 'Xem đề gốc'}</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Paper Raw Content Inspection Modal */}
+          {selectedPaperDetails && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 overflow-y-auto">
+              <div className="relative w-full max-w-4xl rounded-3xl border border-white/20 bg-slate-950 p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3 shrink-0">
+                  <div className="flex items-center gap-2.5">
+                    <BookOpen className="w-5 h-5 text-indigo-400" />
+                    <div>
+                      <h3 className="text-base font-bold text-white">{selectedPaperDetails.sourceName}</h3>
+                      <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                        <span className="text-indigo-300 font-mono">{selectedPaperDetails.subjectCode}</span>
+                        <span>·</span>
+                        <span>Năm: {selectedPaperDetails.examYear || 'Không ghi'}</span>
+                        <span>·</span>
+                        <span>{new Date(selectedPaperDetails.submittedAt).toLocaleString('vi-VN')}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedPaperDetails(null)}
+                    className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-hidden flex flex-col space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+                    <span>Nội dung văn bản đề thi thô trích xuất từ nguồn:</span>
+                    <button
+                      onClick={() => {
+                        if (selectedPaperDetails.rawContent) {
+                          navigator.clipboard.writeText(selectedPaperDetails.rawContent);
+                          alert('Đã sao chép nội dung văn bản đề gốc vào bộ nhớ tạm.');
+                        }
+                      }}
+                      className="text-indigo-400 hover:text-indigo-300 underline"
+                    >
+                      Sao chép toàn bộ
+                    </button>
+                  </div>
+                  <pre className="flex-1 overflow-auto rounded-2xl bg-black/70 p-4 font-mono text-xs text-slate-200 border border-white/10 whitespace-pre-wrap leading-relaxed select-text">
+                    {selectedPaperDetails.rawContent || 'Không có văn bản gốc.'}
+                  </pre>
+                </div>
+
+                <div className="flex justify-end pt-2 border-t border-white/10 shrink-0">
+                  <button
+                    onClick={() => setSelectedPaperDetails(null)}
+                    className="rounded-xl border border-white/10 bg-slate-900 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5"
+                  >
+                    Đóng đối chiếu
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Edit Question Modal */}
           {editingQuestion && (

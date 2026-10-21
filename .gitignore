@@ -29,6 +29,9 @@ yarn-error.log*
 
 # Documentation
 docs/
+!docs/
+docs/*
+!docs/ingestion-module-roadmap.md
 
 # Build artifacts & packages
 publish/

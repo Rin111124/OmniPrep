@@ -211,12 +211,26 @@ public interface IIngestionService
         CancellationToken ct = default);
 }
 
+public record QuestionValidationResult(
+    bool IsValid,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<string> Warnings
+);
+
+public interface IQuestionValidator
+{
+    QuestionValidationResult Validate(ExtractedQuestion question, SubjectCode subjectCode);
+}
+
 public record IngestionResult(
     int TotalExtracted,
     int TotalNew,
     int TotalMerged,
     int TotalFailed,
-    IReadOnlyList<string> Errors
+    IReadOnlyList<string> Errors,
+    int Part1Count = 0,
+    int Part2Count = 0,
+    int Part3Count = 0
 );
 
 /// <summary>

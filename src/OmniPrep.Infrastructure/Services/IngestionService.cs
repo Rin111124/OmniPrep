@@ -29,6 +29,7 @@ public sealed class IngestionService : IIngestionService
     private readonly IQuestionRepository _questionRepo;
     private readonly IExamPaperRepository _paperRepo;
     private readonly ISubjectRepository _subjectRepo;
+    private readonly IQuestionValidator _validator;
     private readonly ILogger<IngestionService> _logger;
 
     public IngestionService(
@@ -38,6 +39,7 @@ public sealed class IngestionService : IIngestionService
         IQuestionRepository questionRepo,
         IExamPaperRepository paperRepo,
         ISubjectRepository subjectRepo,
+        IQuestionValidator validator,
         ILogger<IngestionService> logger)
     {
         _geminiService = geminiService;
@@ -46,6 +48,7 @@ public sealed class IngestionService : IIngestionService
         _questionRepo = questionRepo;
         _paperRepo = paperRepo;
         _subjectRepo = subjectRepo;
+        _validator = validator;
         _logger = logger;
     }
 
@@ -90,11 +93,33 @@ public sealed class IngestionService : IIngestionService
             throw;
         }
 
+        if (extractedQuestions.Count == 0)
+        {
+            var msg = "Không trích xuất được câu hỏi nào từ văn bản đã cung cấp. Vui lòng kiểm tra lại chất lượng nội dung đề.";
+            errors.Add(msg);
+            _logger.LogWarning(msg);
+            return new IngestionResult(0, 0, 0, 0, errors, 0, 0, 0);
+        }
+
+        int part1Count = extractedQuestions.Count(q => string.Equals(q.Format, "MULTIPLE_CHOICE", StringComparison.OrdinalIgnoreCase));
+        int part2Count = extractedQuestions.Count(q => string.Equals(q.Format, "TRUE_FALSE", StringComparison.OrdinalIgnoreCase));
+        int part3Count = extractedQuestions.Count(q => string.Equals(q.Format, "SHORT_ANSWER", StringComparison.OrdinalIgnoreCase));
+
         // =====================================================
-        // BƯỚC 2: Xử lý từng câu qua pipeline chống trùng lặp
+        // BƯỚC 2: Kiểm tra chất lượng (Validator) & Chống trùng lặp
         // =====================================================
         foreach (var extracted in extractedQuestions)
         {
+            var validation = _validator.Validate(extracted, subjectCode);
+            if (!validation.IsValid)
+            {
+                totalFailed++;
+                var errMsg = $"Câu không đạt chuẩn: {string.Join(", ", validation.Errors)} (Nội dung: '{extracted.Content[..Math.Min(40, extracted.Content.Length)]}...')";
+                errors.Add(errMsg);
+                _logger.LogWarning(errMsg);
+                continue;
+            }
+
             try
             {
                 var isNew = await ProcessSingleQuestionAsync(
@@ -119,7 +144,7 @@ public sealed class IngestionService : IIngestionService
             "Hoàn thành bóc tách đề {PaperId}: Trích xuất={Total}, Mới={New}, Gộp={Merged}, Lỗi={Failed}",
             examPaperId, totalExtracted, totalNew, totalMerged, totalFailed);
 
-        return new IngestionResult(totalExtracted, totalNew, totalMerged, totalFailed, errors);
+        return new IngestionResult(totalExtracted, totalNew, totalMerged, totalFailed, errors, part1Count, part2Count, part3Count);
     }
 
     /// <summary>

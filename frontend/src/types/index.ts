@@ -198,6 +198,7 @@ export interface IngestionPayload {
   sourceName: string;
   examYear?: number;
   rawContent: string;
+  file?: File;
 }
 
 export interface IngestionStatusResponse {
@@ -207,7 +208,11 @@ export interface IngestionStatusResponse {
   totalNew: number;
   totalMerged: number;
   totalFailed: number;
+  part1Count?: number;
+  part2Count?: number;
+  part3Count?: number;
   errors?: string[];
+  message?: string;
 }
 
 // Mistake Notebook & Drill

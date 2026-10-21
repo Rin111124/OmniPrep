@@ -90,8 +90,10 @@ public static class InfrastructureServiceExtensions
         services.AddScoped<IExamPaperRepository, ExamPaperRepository>();
 
         // =====================================================
-        // DOMAIN SERVICES
+        // DOMAIN SERVICES & PIPELINE
         // =====================================================
+        services.AddSingleton<IQuestionValidator, OmniPrep.Infrastructure.Validation.QuestionValidator>();
+        services.AddSingleton<IPdfDocumentExtractor, PdfDocumentExtractor>();
         services.AddScoped<IIngestionService, IngestionService>();
         services.AddScoped<IGradingService, GradingService>();
         services.AddScoped<IExamGenerationService, ExamGenerationService>();
