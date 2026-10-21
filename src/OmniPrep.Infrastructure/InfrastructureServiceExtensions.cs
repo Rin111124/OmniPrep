@@ -35,6 +35,14 @@ public static class InfrastructureServiceExtensions
             options.UseNpgsql(connStr, npgsql =>
             {
                 npgsql.UseVector();  // Kích hoạt pgvector
+                // Register native PostgreSQL enums with the driver as well as EF.
+                var enumNameTranslator = new UppercaseSnakeCaseNameTranslator();
+                npgsql.MapEnum<SubjectCode>("subject_code", enumNameTranslator);
+                npgsql.MapEnum<QuestionFormat>("question_format", enumNameTranslator);
+                npgsql.MapEnum<DifficultyLevel>("difficulty_level", enumNameTranslator);
+                npgsql.MapEnum<IngestionStatus>("ingestion_status", enumNameTranslator);
+                npgsql.MapEnum<AnswerStatus>("answer_status", enumNameTranslator);
+                npgsql.MapEnum<UserRole>("user_role", enumNameTranslator);
                 npgsql.EnableRetryOnFailure(3);
                 npgsql.CommandTimeout(30);
             });
