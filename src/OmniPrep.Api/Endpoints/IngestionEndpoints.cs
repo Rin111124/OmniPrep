@@ -42,7 +42,7 @@ public static class IngestionEndpoints
             CancellationToken ct) =>
         {
             if (!IsAdmin(user)) return Results.Forbid();
-            if (!Enum.TryParse<SubjectCode>(subjectCode, ignoreCase: true, out var code))
+            if (!TryParseSubjectCode(subjectCode, out var code))
                 return Results.BadRequest($"Mã môn học không hợp lệ: {subjectCode}");
 
             var subject = await subjectRepo.GetByCodeAsync(code, ct);
@@ -95,84 +95,167 @@ public static class IngestionEndpoints
                 return Results.BadRequest("Vui lòng tải lên file đề thi (.txt/.pdf) hoặc dán nội dung văn bản rawContent.");
             }
 
-            var fileHash = Convert.ToHexString(
-                SHA256.HashData(Encoding.UTF8.GetBytes(contentToProcess))).ToLowerInvariant();
-            if (contentToProcess.Length > 10 * 1024 * 1024)
-                return Results.BadRequest("Nội dung đề tối đa là 10 MB.");
+            return await ExecuteIngestionPipelineAsync(
+                contentToProcess, title, null, code, sourceName, examYear,
+                subject, db, paperRepo, ingestionService, ct);
+        }).WithName("IngestExamPaper").DisableAntiforgery();
 
-            var existingPaper = await paperRepo.GetByFileHashAsync(fileHash, ct);
-            if (existingPaper is not null && existingPaper.Status == IngestionStatus.Completed)
-                return Results.Conflict("Đề này đã được bóc tách và nạp thành công trước đó.");
+        /// <summary>
+        /// Danh mục kho đề thi trực tuyến mở có sẵn trên hệ thống (không cần nạp file thủ công)
+        /// </summary>
+        ingestion.MapGet("/online-catalog", async (
+            string? subjectCode,
+            ClaimsPrincipal user,
+            OmniPrepDbContext db,
+            CancellationToken ct) =>
+        {
+            if (!IsTeacherOrAdmin(user)) return Results.Forbid();
 
-            var source = await db.ExamSources.FirstOrDefaultAsync(s => s.Name == sourceName, ct);
-            if (source is null)
+            var catalog = OnlineExamCatalog.GetCatalog();
+            if (!string.IsNullOrWhiteSpace(subjectCode) && TryParseSubjectCode(subjectCode, out var code))
             {
-                source = new ExamSource
-                {
-                    Id = Guid.NewGuid(),
-                    Name = sourceName,
-                    SourceType = "manual",
-                    CreatedAt = DateTimeOffset.UtcNow
-                };
-                db.ExamSources.Add(source);
-                await db.SaveChangesAsync(ct);
+                catalog = catalog.Where(c => c.SubjectCode == code).ToList();
             }
 
-            var paper = existingPaper ?? new ExamPaper
-            {
-                Id = Guid.NewGuid(),
-                SourceId = source.Id,
-                SubjectId = subject.Id,
-                Title = title,
-                ExamYear = examYear,
-                FileHash = fileHash,
-                RawContent = contentToProcess,
-                SubmittedAt = DateTimeOffset.UtcNow
-            };
+            var ingestedTitles = await db.ExamPapers.AsNoTracking()
+                .Select(p => p.Title)
+                .ToListAsync(ct);
+            var ingestedTitleSet = new HashSet<string>(ingestedTitles, StringComparer.OrdinalIgnoreCase);
 
-            paper.Status = IngestionStatus.Processing;
-            if (existingPaper is null)
+            var result = catalog.Select(c => new
             {
-                await paperRepo.AddAsync(paper, ct);
-            }
-            await paperRepo.SaveChangesAsync(ct);
+                c.Id,
+                c.Title,
+                SubjectCode = c.SubjectCode.ToString(),
+                c.SourceName,
+                c.ExamYear,
+                c.DocumentType,
+                c.TotalQuestionsEstimated,
+                c.Description,
+                c.RemoteUrl,
+                IsAlreadyIngested = ingestedTitleSet.Contains(c.Title)
+            });
 
-            // Bóc tách trực tiếp bằng Gemini AI và chạy chống trùng lặp 2 tầng
+            return Results.Ok(result);
+        }).WithName("GetOnlineExamCatalog");
+
+        /// <summary>
+        /// Tự động tải file đề thi từ URL trực tuyến và bóc tách câu hỏi ngay trên máy chủ
+        /// </summary>
+        ingestion.MapPost("/from-url", async (
+            IngestFromUrlRequest req,
+            ClaimsPrincipal user,
+            OmniPrepDbContext db,
+            IExamPaperRepository paperRepo,
+            ISubjectRepository subjectRepo,
+            IIngestionService ingestionService,
+            IPdfDocumentExtractor pdfExtractor,
+            IHttpClientFactory httpClientFactory,
+            CancellationToken ct) =>
+        {
+            if (!IsAdmin(user)) return Results.Forbid();
+            if (!TryParseSubjectCode(req.SubjectCode, out var code))
+                return Results.BadRequest($"Mã môn học không hợp lệ: {req.SubjectCode}");
+
+            if (string.IsNullOrWhiteSpace(req.RemoteUrl) || !Uri.TryCreate(req.RemoteUrl, UriKind.Absolute, out var uri))
+                return Results.BadRequest("Đường dẫn URL không hợp lệ.");
+
+            if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+                return Results.BadRequest("Hệ thống chỉ chấp nhận giao thức web https/http.");
+
+            if (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest("Không được phép truy cập địa chỉ loopback hoặc mạng nội bộ.");
+
+            var subject = await subjectRepo.GetByCodeAsync(code, ct);
+            if (subject is null) return Results.NotFound($"Môn học không tồn tại: {req.SubjectCode}");
+
+            string contentToProcess;
+            string title = !string.IsNullOrWhiteSpace(req.Title) ? req.Title : Path.GetFileName(uri.LocalPath);
+            if (string.IsNullOrWhiteSpace(title)) title = $"Đề thi trực tuyến từ {uri.Host}";
+
             try
             {
-                var result = await ingestionService.IngestExamPaperAsync(
-                    paper.Id, contentToProcess, code, source.Name, examYear, ct);
+                using var client = httpClientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(30);
+                using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+                response.EnsureSuccessStatusCode();
 
-                paper.Status = result.TotalFailed == result.TotalExtracted && result.TotalExtracted > 0
-                    ? IngestionStatus.Failed
-                    : IngestionStatus.Completed;
-                await paperRepo.SaveChangesAsync(ct);
+                var contentType = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? "";
+                var contentLength = response.Content.Headers.ContentLength;
+                if (contentLength > 10 * 1024 * 1024)
+                    return Results.BadRequest("File tải về vượt quá giới hạn 10 MB.");
 
-                return Results.Ok(new
+                var isPdf = contentType.Contains("pdf") || uri.LocalPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
+
+                if (isPdf)
                 {
-                    PaperId = paper.Id,
-                    Status = paper.Status.ToString(),
-                    TotalExtracted = result.TotalExtracted,
-                    TotalNew = result.TotalNew,
-                    TotalMerged = result.TotalMerged,
-                    TotalFailed = result.TotalFailed,
-                    Part1Count = result.Part1Count,
-                    Part2Count = result.Part2Count,
-                    Part3Count = result.Part3Count,
-                    Errors = result.Errors,
-                    Message = $"Bóc tách hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi."
-                });
+                    await using var stream = await response.Content.ReadAsStreamAsync(ct);
+                    contentToProcess = await pdfExtractor.ExtractTextAsync(stream, ct);
+                }
+                else
+                {
+                    contentToProcess = await response.Content.ReadAsStringAsync(ct);
+                }
+
+                if (string.IsNullOrWhiteSpace(contentToProcess))
+                    return Results.BadRequest("Không thể đọc được văn bản đề thi từ đường dẫn đã cung cấp.");
             }
             catch (Exception ex)
             {
-                paper.Status = IngestionStatus.Failed;
-                await paperRepo.SaveChangesAsync(ct);
-                return Results.Problem(
-                    title: "Bóc tách đề thi thất bại",
-                    detail: ex.Message,
-                    statusCode: StatusCodes.Status500InternalServerError);
+                return Results.BadRequest($"Lỗi khi tải tài liệu từ mạng: {ex.Message}");
             }
-        }).WithName("IngestExamPaper").DisableAntiforgery();
+
+            return await ExecuteIngestionPipelineAsync(
+                contentToProcess, title, req.RemoteUrl, code, req.SourceName, req.ExamYear,
+                subject, db, paperRepo, ingestionService, ct);
+        }).WithName("IngestFromUrl");
+
+        /// <summary>
+        /// Tự động tìm kiếm đề thi trực tuyến theo môn học, tự tải và bóc tách ngay
+        /// </summary>
+        ingestion.MapPost("/auto-fetch", async (
+            AutoFetchOnlineRequest req,
+            ClaimsPrincipal user,
+            OmniPrepDbContext db,
+            IExamPaperRepository paperRepo,
+            ISubjectRepository subjectRepo,
+            IIngestionService ingestionService,
+            CancellationToken ct) =>
+        {
+            if (!IsAdmin(user)) return Results.Forbid();
+            if (!TryParseSubjectCode(req.SubjectCode, out var code))
+                return Results.BadRequest($"Mã môn học không hợp lệ: {req.SubjectCode}");
+
+            var subject = await subjectRepo.GetByCodeAsync(code, ct);
+            if (subject is null) return Results.NotFound($"Môn học không tồn tại: {req.SubjectCode}");
+
+            var catalog = OnlineExamCatalog.GetCatalog().Where(c => c.SubjectCode == code).ToList();
+            if (catalog.Count == 0)
+                return Results.NotFound($"Chưa có đề thi trực tuyến trong kho cho môn {req.SubjectCode}.");
+
+            OnlineExamItem? targetPaper;
+            if (!string.IsNullOrWhiteSpace(req.CatalogId))
+            {
+                targetPaper = catalog.FirstOrDefault(c => c.Id == req.CatalogId);
+            }
+            else
+            {
+                var ingestedTitles = await db.ExamPapers.AsNoTracking()
+                    .Select(p => p.Title)
+                    .ToListAsync(ct);
+                var ingestedTitleSet = new HashSet<string>(ingestedTitles, StringComparer.OrdinalIgnoreCase);
+                targetPaper = catalog.FirstOrDefault(c => !ingestedTitleSet.Contains(c.Title)) ?? catalog[0];
+            }
+
+            if (targetPaper is null)
+                return Results.NotFound("Không tìm thấy đề thi trực tuyến phù hợp.");
+
+            string contentToProcess = targetPaper.GetContent();
+
+            return await ExecuteIngestionPipelineAsync(
+                contentToProcess, targetPaper.Title, targetPaper.RemoteUrl, code, targetPaper.SourceName, targetPaper.ExamYear,
+                subject, db, paperRepo, ingestionService, ct);
+        }).WithName("AutoFetchOnlineExam");
 
         /// <summary>
         /// Danh sách tài liệu đề thi đã nạp phục vụ đối chiếu nguồn gốc (Mục 8 & 10 Lộ trình)
@@ -235,4 +318,101 @@ public static class IngestionEndpoints
 
         return group;
     }
+
+    private static async Task<IResult> ExecuteIngestionPipelineAsync(
+        string contentToProcess,
+        string title,
+        string? fileUrl,
+        SubjectCode code,
+        string sourceName,
+        short? examYear,
+        Subject subject,
+        OmniPrepDbContext db,
+        IExamPaperRepository paperRepo,
+        IIngestionService ingestionService,
+        CancellationToken ct)
+    {
+        if (contentToProcess.Length > 10 * 1024 * 1024)
+            return Results.BadRequest("Nội dung đề tối đa là 10 MB.");
+
+        var fileHash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(contentToProcess))).ToLowerInvariant();
+
+        var existingPaper = await paperRepo.GetByFileHashAsync(fileHash, ct);
+        if (existingPaper is not null && existingPaper.Status == IngestionStatus.Completed)
+            return Results.Conflict("Đề này đã được bóc tách và nạp thành công trước đó.");
+
+        var source = await db.ExamSources.FirstOrDefaultAsync(s => s.Name == sourceName, ct);
+        if (source is null)
+        {
+            source = new ExamSource
+            {
+                Id = Guid.NewGuid(),
+                Name = sourceName,
+                SourceType = "online_repository",
+                WebsiteUrl = fileUrl,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            db.ExamSources.Add(source);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var paper = existingPaper ?? new ExamPaper
+        {
+            Id = Guid.NewGuid(),
+            SourceId = source.Id,
+            SubjectId = subject.Id,
+            Title = title,
+            ExamYear = examYear,
+            FileUrl = fileUrl,
+            FileHash = fileHash,
+            RawContent = contentToProcess,
+            SubmittedAt = DateTimeOffset.UtcNow
+        };
+
+        paper.Status = IngestionStatus.Processing;
+        if (existingPaper is null)
+        {
+            await paperRepo.AddAsync(paper, ct);
+        }
+        await paperRepo.SaveChangesAsync(ct);
+
+        try
+        {
+            var result = await ingestionService.IngestExamPaperAsync(
+                paper.Id, contentToProcess, code, source.Name, examYear, ct);
+
+            paper.Status = result.TotalFailed == result.TotalExtracted && result.TotalExtracted > 0
+                ? IngestionStatus.Failed
+                : IngestionStatus.Completed;
+            await paperRepo.SaveChangesAsync(ct);
+
+            return Results.Ok(new
+            {
+                PaperId = paper.Id,
+                Status = paper.Status.ToString(),
+                TotalExtracted = result.TotalExtracted,
+                TotalNew = result.TotalNew,
+                TotalMerged = result.TotalMerged,
+                TotalFailed = result.TotalFailed,
+                Part1Count = result.Part1Count,
+                Part2Count = result.Part2Count,
+                Part3Count = result.Part3Count,
+                Errors = result.Errors,
+                Message = $"Bóc tách hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi."
+            });
+        }
+        catch (Exception ex)
+        {
+            paper.Status = IngestionStatus.Failed;
+            await paperRepo.SaveChangesAsync(ct);
+            return Results.Problem(
+                title: "Bóc tách đề thi thất bại",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    public sealed record IngestFromUrlRequest(string SubjectCode, string SourceName, string RemoteUrl, string? Title = null, short? ExamYear = null);
+    public sealed record AutoFetchOnlineRequest(string SubjectCode, string? CatalogId = null);
 }

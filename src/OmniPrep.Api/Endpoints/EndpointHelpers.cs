@@ -43,4 +43,38 @@ internal static class EndpointHelpers
 
     internal static bool IsAdmin(ClaimsPrincipal user) => GetUserRole(user) == UserRole.Admin;
     internal static bool IsTeacherOrAdmin(ClaimsPrincipal user) => GetUserRole(user) is UserRole.Teacher or UserRole.Admin;
+
+    internal static bool TryParseSubjectCode(string? input, out SubjectCode code)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            code = default;
+            return false;
+        }
+
+        if (Enum.TryParse<SubjectCode>(input, ignoreCase: true, out code))
+            return true;
+
+        var mapped = input.Trim().ToUpperInvariant() switch
+        {
+            "GEOGRAPHY" => (SubjectCode?)SubjectCode.GEO,
+            "LAW_ECONOMICS" => SubjectCode.GDKTPL,
+            "MATHEMATICS" => SubjectCode.MATH,
+            "PHYSICS" => SubjectCode.PHYS,
+            "CHEMISTRY" => SubjectCode.CHEM,
+            "BIOLOGY" => SubjectCode.BIO,
+            "HISTORY" => SubjectCode.HIS,
+            "ENGLISH" => SubjectCode.ENG,
+            _ => null
+        };
+
+        if (mapped.HasValue)
+        {
+            code = mapped.Value;
+            return true;
+        }
+
+        code = default;
+        return false;
+    }
 }

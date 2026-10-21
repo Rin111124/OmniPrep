@@ -18,9 +18,12 @@ import {
   getIngestedPapers,
   getIngestedPaperDetails,
   IngestedPaper,
-  scanExamSourcesBySubject
+  scanExamSourcesBySubject,
+  getOnlineExamCatalog,
+  ingestFromRemoteUrl,
+  autoFetchOnlineExam
 } from '@/lib/api';
-import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult } from '@/types';
+import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult, OnlineCatalogItem } from '@/types';
 import {
   Clock,
   CheckCircle2,
@@ -38,7 +41,11 @@ import {
   BookOpen,
   AlertTriangle,
   Zap,
-  Compass
+  Compass,
+  Globe,
+  DownloadCloud,
+  Link as LinkIcon,
+  ExternalLink
 } from 'lucide-react';
 
 const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
@@ -100,6 +107,14 @@ export default function AdminPage() {
   const [scannedSourceResult, setScannedSourceResult] = useState<SubjectSourceScanResult | null>(null);
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [sourceNotice, setSourceNotice] = useState<string | null>(null);
+
+  // Online Catalog & Remote URL Ingestion State
+  const [ingestionMode, setIngestionMode] = useState<'upload' | 'online'>('upload');
+  const [onlineCatalog, setOnlineCatalog] = useState<OnlineCatalogItem[]>([]);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
+  const [remoteUrlInput, setRemoteUrlInput] = useState('');
+  const [isFetchingRemoteUrl, setIsFetchingRemoteUrl] = useState(false);
+  const [isAutoFetchingOnline, setIsAutoFetchingOnline] = useState(false);
 
   const handleScanSubjectSources = async (autoSelect = false) => {
     setIsScanningSource(true);
@@ -277,6 +292,68 @@ export default function AdminPage() {
     }
   };
 
+  const loadOnlineCatalog = useCallback(async (code: SubjectCode) => {
+    setIsLoadingCatalog(true);
+    try {
+      const items = await getOnlineExamCatalog(code);
+      setOnlineCatalog(items);
+    } catch {
+      // Ignored
+    } finally {
+      setIsLoadingCatalog(false);
+    }
+  }, []);
+
+  const handleIngestFromRemoteUrl = async () => {
+    if (!remoteUrlInput.trim()) {
+      setSourceNotice('Vui lòng nhập đường dẫn URL của đề thi (.pdf hoặc .txt).');
+      return;
+    }
+    setIsFetchingRemoteUrl(true);
+    setError('');
+    setResult(null);
+    setSourceNotice(`🌐 Đang tải file từ URL: "${remoteUrlInput}" và bóc tách trực tiếp trên máy chủ...`);
+    try {
+      const resp = await ingestFromRemoteUrl({
+        subjectCode,
+        sourceName: sourceName.trim() || `Đề trực tuyến môn ${supportedSubjects.find(s => s.code === subjectCode)?.label}`,
+        remoteUrl: remoteUrlInput.trim(),
+        examYear: examYear ? Number(examYear) : undefined
+      });
+      setResult(resp);
+      setSourceNotice(`✅ Đã tải và bóc tách thành công: ${resp.totalExtracted || 0} câu hỏi từ liên kết trực tuyến!`);
+      void refreshPending();
+      void loadIngestedPapers();
+      void loadOnlineCatalog(subjectCode);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Không thể tải và bóc tách đề từ URL.');
+    } finally {
+      setIsFetchingRemoteUrl(false);
+    }
+  };
+
+  const handleAutoFetchOnline = async (catalogId?: string) => {
+    setIsAutoFetchingOnline(true);
+    setError('');
+    setResult(null);
+    setSourceNotice('🌐 Hệ thống đang tự động tìm kiếm, tải và bóc tách đề thi trực tuyến từ kho mở...');
+    try {
+      const resp = await autoFetchOnlineExam({
+        subjectCode,
+        catalogId
+      });
+      setResult(resp);
+      setSourceNotice(`✅ Đã tự động tải & bóc tách thành công: ${resp.totalExtracted || 0} câu hỏi! Bạn có thể chọn đề thi này để làm bài ngay.`);
+      void refreshPending();
+      void loadIngestedPapers();
+      void loadOnlineCatalog(subjectCode);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Không thể tự động tải và bóc tách đề trực tuyến.');
+    } finally {
+      setIsAutoFetchingOnline(false);
+    }
+  };
+
   const refreshStats = useCallback(async () => {
     try {
       const data = await getModerationStats();
@@ -324,6 +401,20 @@ export default function AdminPage() {
       cancelAnimationFrame(frame);
     };
   }, [authLoading, refreshStats, role]);
+
+  useEffect(() => {
+    if (ingestionMode !== 'online') return;
+    let active = true;
+    const frame = requestAnimationFrame(() => {
+      if (!active) return;
+      void loadOnlineCatalog(subjectCode);
+    });
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+    };
+  }, [ingestionMode, subjectCode, loadOnlineCatalog]);
 
   async function handleReview(questionId: string, action: 'verify' | 'reject') {
     const note = reviewNotes[questionId]?.trim() || '';
@@ -431,6 +522,14 @@ export default function AdminPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (ingestionMode === 'online') {
+      if (remoteUrlInput.trim()) {
+        await handleIngestFromRemoteUrl();
+      } else {
+        await handleAutoFetchOnline();
+      }
+      return;
+    }
     if (isSubmitting) return;
     setError('');
     setResult(null);
@@ -548,10 +647,249 @@ export default function AdminPage() {
 
           {role === 'ADMIN' && (
             <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-xl">
-              <div className="flex items-center gap-2 border-b border-white/10 pb-3">
-                <FileText className="w-5 h-5 text-indigo-400" />
-                <h2 className="text-lg font-bold">Nạp đề thi mới vào hàng đợi bóc tách</h2>
+              {/* FORM HEADER & MODE SWITCHER */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-indigo-400" />
+                  <h2 className="text-lg font-bold">Nạp & bóc tách đề thi vào hệ thống</h2>
+                </div>
+
+                <div className="flex items-center rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIngestionMode('upload')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      ingestionMode === 'upload'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>📁 Nạp file / Văn bản</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-admin-mode-online"
+                    onClick={() => {
+                      setIngestionMode('online');
+                      void loadOnlineCatalog(subjectCode);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      ingestionMode === 'online'
+                        ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Globe className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+                    <span>🌐 Kho đề trực tuyến (Không cần file)</span>
+                  </button>
+                </div>
               </div>
+
+              {sourceNotice && (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-cyan-950/50 border border-cyan-500/30 text-xs text-cyan-200 shadow-md">
+                  <span className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <span>{sourceNotice}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSourceNotice(null)}
+                    className="text-cyan-400 hover:text-white ml-2 p-1 rounded hover:bg-cyan-900/40"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* MODE 1: ONLINE INGESTION (KHÔNG CẦN NẠP FILE) */}
+              {ingestionMode === 'online' && (
+                <div className="space-y-4">
+                  {/* Subject Selector for Online Repo */}
+                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-cyan-300 shrink-0">
+                        <Layers className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Môn học cần tìm & bóc tách đề</span>
+                        <p className="text-[11px] text-slate-400">Chọn môn học để hệ thống tự động lọc đề thi tương ứng từ kho mở</p>
+                      </div>
+                    </div>
+                    <select
+                      value={subjectCode}
+                      onChange={event => {
+                        const nextSubject = event.target.value as SubjectCode;
+                        setSubjectCode(nextSubject);
+                        void loadOnlineCatalog(nextSubject);
+                      }}
+                      className="rounded-xl border border-white/10 bg-slate-950 px-3.5 py-2 text-sm font-bold text-white focus:outline-none focus:border-cyan-500"
+                    >
+                      {supportedSubjects.map(subject => <option key={subject.code} value={subject.code}>{subject.label}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Master 1-Click Online Banner */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-r from-cyan-950/70 via-indigo-950/60 to-purple-950/70 border border-cyan-500/40 shadow-xl space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex items-start gap-3.5">
+                        <div className="p-3 rounded-2xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-white shadow-lg shadow-cyan-500/20 shrink-0">
+                          <Globe className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-base font-bold text-white">
+                              Tự động tìm kiếm, tải & bóc tách đề trực tuyến
+                            </h3>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
+                              1 Chạm Không Cần File
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                            Hệ thống tự động chọn đề thi mới nhất từ kho đề mở chuẩn 2025 theo môn <strong className="text-cyan-300">{supportedSubjects.find(s => s.code === subjectCode)?.label}</strong>, máy chủ tải trực tiếp và bóc tách cấu trúc 3 phần vào ngân hàng câu hỏi.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        id="btn-admin-auto-fetch-online"
+                        onClick={() => void handleAutoFetchOnline()}
+                        disabled={isAutoFetchingOnline || isFetchingRemoteUrl || isSubmitting}
+                        className="shrink-0 px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-black text-xs sm:text-sm shadow-xl shadow-cyan-950/60 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.03] active:scale-[0.98] disabled:opacity-50"
+                      >
+                        <Zap className={`w-4 h-4 text-yellow-300 ${isAutoFetchingOnline ? 'animate-spin' : ''}`} />
+                        <span>{isAutoFetchingOnline ? 'Đang tự tìm & bóc tách...' : '⚡ Tự tìm & Bóc tách đề này ngay'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Remote URL Ingestion */}
+                  <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
+                      <LinkIcon className="w-4 h-4" />
+                      <span>Hoặc tải & bóc tách từ liên kết URL từ xa (PDF / TXT)</span>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://example.edu.vn/de-thi-tot-nghiep-thpt-2025.pdf"
+                        value={remoteUrlInput}
+                        onChange={e => setRemoteUrlInput(e.target.value)}
+                        className="flex-1 rounded-xl border border-white/10 bg-slate-950 px-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
+                      />
+                      <button
+                        type="button"
+                        id="btn-admin-ingest-remote-url"
+                        onClick={() => void handleIngestFromRemoteUrl()}
+                        disabled={isFetchingRemoteUrl || !remoteUrlInput.trim()}
+                        className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all shrink-0"
+                      >
+                        <DownloadCloud className={`w-4 h-4 ${isFetchingRemoteUrl ? 'animate-spin' : ''}`} />
+                        <span>{isFetchingRemoteUrl ? 'Đang tải & bóc tách...' : '⚡ Tải & Bóc tách từ URL'}</span>
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Hỗ trợ link công khai từ Bộ GD&ĐT, các Sở GD, Cổng thông tin thi. Máy chủ OmniPrep sẽ tải ngầm, trích xuất văn bản an toàn và bóc tách tự động.
+                    </p>
+                  </div>
+
+                  {/* Available Online Catalog Grid */}
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-cyan-400" />
+                        <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                          Kho đề trực tuyến mở sẵn có ({onlineCatalog.length} đề môn {supportedSubjects.find(s => s.code === subjectCode)?.label})
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void loadOnlineCatalog(subjectCode)}
+                        disabled={isLoadingCatalog}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCatalog ? 'animate-spin' : ''}`} />
+                        <span>Làm mới</span>
+                      </button>
+                    </div>
+
+                    {isLoadingCatalog ? (
+                      <div className="py-8 text-center text-slate-400 text-xs">
+                        <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-cyan-400" />
+                        Đang tra cứu kho đề trực tuyến...
+                      </div>
+                    ) : onlineCatalog.length === 0 ? (
+                      <div className="p-6 text-center text-slate-400 text-xs rounded-2xl border border-white/5 bg-slate-900/50">
+                        Kho đề trực tuyến chưa có sẵn đề mẫu lưu trữ cho môn này. Bạn có thể sử dụng nút dán URL trực tiếp ở trên.
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {onlineCatalog.map(item => (
+                          <div
+                            key={item.id}
+                            className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                              item.isAlreadyIngested
+                                ? 'bg-emerald-950/20 border-emerald-500/30'
+                                : 'bg-slate-900/70 border-white/10 hover:border-cyan-500/40 hover:bg-slate-900'
+                            }`}
+                          >
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                  {item.documentType}
+                                </span>
+                                {item.isAlreadyIngested && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3" /> Đã bóc tách
+                                  </span>
+                                )}
+                              </div>
+                              <h5 className="text-sm font-bold text-white line-clamp-2">{item.title}</h5>
+                              <p className="text-xs text-slate-400 flex items-center gap-2">
+                                <span>Nguồn: <strong className="text-slate-300">{item.sourceName}</strong></span>
+                                <span>• Năm: <strong className="text-slate-300">{item.examYear}</strong></span>
+                                <span>• Quy mô: <strong className="text-cyan-300">{item.totalQuestionsEstimated} câu</strong></span>
+                              </p>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                              <a
+                                href={item.remoteUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] text-slate-400 hover:text-cyan-300 flex items-center gap-1"
+                                title="Xem trước nguồn đề gốc"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                <span>Link nguồn</span>
+                              </a>
+
+                              <button
+                                type="button"
+                                onClick={() => void handleAutoFetchOnline(item.id)}
+                                disabled={isAutoFetchingOnline}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                                  item.isAlreadyIngested
+                                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                    : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white shadow-md'
+                                }`}
+                              >
+                                <Zap className="w-3.5 h-3.5 text-yellow-300" />
+                                <span>{item.isAlreadyIngested ? 'Bóc tách lại' : 'Tải & Bóc tách đề này'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* MODE 2: UPLOAD FILE / DÁN VĂN BẢN (THỦ CÔNG) */}
+              {ingestionMode === 'upload' && (
+                <>
               {/* AUTO-SCAN & SELECT BANNER */}
               <div className="space-y-3">
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 rounded-2xl bg-gradient-to-r from-indigo-950/70 via-purple-950/50 to-cyan-950/60 border border-indigo-500/40 shadow-lg">
@@ -632,22 +970,6 @@ export default function AdminPage() {
                     </button>
                   </div>
                 </div>
-
-                {sourceNotice && (
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-cyan-950/50 border border-cyan-500/30 text-xs text-cyan-200 shadow-md">
-                    <span className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
-                      <span>{sourceNotice}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setSourceNotice(null)}
-                      className="text-cyan-400 hover:text-white ml-2 p-1 rounded hover:bg-cyan-900/40"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
               </div>
 
               <div className="grid gap-4 sm:grid-cols-3">
@@ -888,6 +1210,8 @@ export default function AdminPage() {
                   className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 p-3 font-mono text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/50"
                 />
               </label>
+                </>
+              )}
 
               {error && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-sm text-rose-200">{error}</p>}
               {result && (
@@ -979,13 +1303,15 @@ export default function AdminPage() {
                 </div>
               )}
 
-              <button
-                disabled={isSubmitting || (!rawContent.trim() && !selectedFile) || !sourceName.trim()}
-                className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-50 transition-all hover:scale-[1.01] active:scale-[0.99]"
-              >
-                <Sparkles className="w-4 h-4 text-indigo-300" />
-                <span>{isSubmitting ? 'Hệ thống đang bóc tách & nạp đề thi...' : 'Bóc tách & Nạp đề thi ngay'}</span>
-              </button>
+              {ingestionMode === 'upload' && (
+                <button
+                  disabled={isSubmitting || (!rawContent.trim() && !selectedFile) || !sourceName.trim()}
+                  className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-50 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                >
+                  <Sparkles className="w-4 h-4 text-indigo-300" />
+                  <span>{isSubmitting ? 'Hệ thống đang bóc tách & nạp đề thi...' : 'Bóc tách & Nạp đề thi ngay'}</span>
+                </button>
+              )}
             </form>
           )}
 

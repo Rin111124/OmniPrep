@@ -20,6 +20,7 @@ import {
   TutorContext,
   ExamSource,
   SubjectSourceScanResult,
+  OnlineCatalogItem,
 } from '@/types';
 
 const API_BASE = '/api/backend';
@@ -249,6 +250,50 @@ export async function getExamSources(params?: { type?: string; province?: string
 export async function scanExamSourcesBySubject(subjectCode: SubjectCode): Promise<SubjectSourceScanResult> {
   const backendCode = backendSubjectCodes[subjectCode] || subjectCode;
   const response = await backendFetch(`/exam-sources/scan?subjectCode=${encodeURIComponent(backendCode)}`);
+  return response.json();
+}
+
+export async function getOnlineExamCatalog(subjectCode?: string): Promise<OnlineCatalogItem[]> {
+  const param = subjectCode ? `?subjectCode=${encodeURIComponent(backendSubjectCodes[subjectCode as SubjectCode] || subjectCode)}` : '';
+  const response = await backendFetch(`/admin/ingest/online-catalog${param}`);
+  return response.json();
+}
+
+export async function ingestFromRemoteUrl(data: {
+  subjectCode: SubjectCode;
+  sourceName: string;
+  remoteUrl: string;
+  title?: string;
+  examYear?: number;
+}): Promise<IngestionStatusResponse> {
+  const backendCode = backendSubjectCodes[data.subjectCode] || data.subjectCode;
+  const response = await backendFetch('/admin/ingest/from-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      subjectCode: backendCode,
+      sourceName: data.sourceName,
+      remoteUrl: data.remoteUrl,
+      title: data.title,
+      examYear: data.examYear
+    })
+  });
+  return response.json();
+}
+
+export async function autoFetchOnlineExam(data: {
+  subjectCode: SubjectCode;
+  catalogId?: string;
+}): Promise<IngestionStatusResponse> {
+  const backendCode = backendSubjectCodes[data.subjectCode] || data.subjectCode;
+  const response = await backendFetch('/admin/ingest/auto-fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      subjectCode: backendCode,
+      catalogId: data.catalogId
+    })
+  });
   return response.json();
 }
 

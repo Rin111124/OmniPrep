@@ -22,6 +22,8 @@ builder.Services.AddOpenApi();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
+builder.Services.AddHttpClient();
+
 // Infrastructure (EF Core, Gemini, Repositories, Services)
 builder.Services.AddInfrastructure(builder.Configuration);
 

@@ -267,3 +267,16 @@ export interface SubjectSourceScanResult {
   recommendedSource: string;
   sources: ScannedSourceItem[];
 }
+
+export interface OnlineCatalogItem {
+  id: string;
+  title: string;
+  subjectCode: string;
+  sourceName: string;
+  examYear: number;
+  documentType: string;
+  totalQuestionsEstimated: number;
+  description: string;
+  remoteUrl: string;
+  isAlreadyIngested: boolean;
+}
