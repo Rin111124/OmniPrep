@@ -574,6 +574,65 @@ export default function AdminPage() {
     }
   }
 
+async function optimizeImageForUpload(file: File): Promise<File> {
+  if (typeof window === 'undefined' || !file.type.startsWith('image/')) {
+    return file;
+  }
+  if (file.size <= 400 * 1024) {
+    return file;
+  }
+
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const maxDim = 1800;
+      let width = img.width;
+      let height = img.height;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || blob.size >= file.size) {
+            resolve(file);
+          } else {
+            const optimized = new File([blob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            });
+            resolve(optimized);
+          }
+        },
+        'image/jpeg',
+        0.82
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
+
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
     if (!files || files.length === 0) {
@@ -585,10 +644,15 @@ export default function AdminPage() {
     const docs = fileArray.filter(f => f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.txt'));
 
     if (images.length > 0) {
-      const updatedImages = [...selectedImages, ...images];
+      setError('');
+      setSourceNotice('🔄 Đang tối ưu hóa độ phân giải ảnh cho AI Vision...');
+      const optimizedImages = await Promise.all(images.map(img => optimizeImageForUpload(img)));
+      setSourceNotice(null);
+
+      const updatedImages = [...selectedImages, ...optimizedImages];
       const totalSize = updatedImages.reduce((sum, f) => sum + f.size, 0);
-      if (totalSize > 25 * 1024 * 1024) {
-        setError('Tổng dung lượng các file ảnh vượt quá giới hạn 25 MB.');
+      if (totalSize > 4.2 * 1024 * 1024) {
+        setError(`Tổng dung lượng các file ảnh (${(totalSize / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4.2 MB của đám mây Vercel Serverless. Vui lòng chọn ít ảnh hơn cho mỗi đợt.`);
         event.target.value = '';
         return;
       }
@@ -600,11 +664,11 @@ export default function AdminPage() {
         const base = images[0].name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
         setSourceName(`Đề in ${base}`);
       }
-      setRawContent(`[Đã nạp ${updatedImages.length} ảnh trang đề thi in ấn. AI Gemini Vision sẽ bóc tách chữ, bảng biểu, hình vẽ và ${autoSolve ? 'tự động giải chi tiết' : 'trích xuất câu hỏi'}].`);
+      setRawContent(`[Đã nạp ${updatedImages.length} ảnh trang đề thi in ấn (${(totalSize / 1024).toFixed(0)} KB đã tối ưu). AI Gemini Vision sẽ bóc tách chữ, bảng biểu, hình vẽ và ${autoSolve ? 'tự động giải chi tiết' : 'trích xuất câu hỏi'}].`);
     } else if (docs.length > 0) {
       const doc = docs[0];
-      if (doc.size > 25 * 1024 * 1024) {
-        setError('File tài liệu vượt quá giới hạn 25 MB.');
+      if (doc.size > 4.2 * 1024 * 1024) {
+        setError(`File tài liệu (${(doc.size / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4.2 MB của đám mây Vercel. Vui lòng chọn file dưới 4.2 MB.`);
         event.target.value = '';
         return;
       }
@@ -700,7 +764,7 @@ export default function AdminPage() {
           )}
 
           {role === 'ADMIN' && (
-            <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-xl">
+            <form method="post" onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-xl">
               {/* FORM HEADER & MODE SWITCHER */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
                 <div className="flex items-center gap-2">
@@ -1493,6 +1557,8 @@ export default function AdminPage() {
 
               {ingestionMode === 'upload' && (
                 <button
+                  type="submit"
+                  id="btn-admin-submit-ingestion"
                   disabled={isSubmitting || (!rawContent.trim() && !selectedFile && selectedImages.length === 0) || !sourceName.trim()}
                   className={`flex items-center gap-2.5 rounded-xl px-5 py-3 text-sm font-bold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 ${
                     selectedImages.length > 0

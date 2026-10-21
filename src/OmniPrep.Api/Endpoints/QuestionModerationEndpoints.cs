@@ -27,21 +27,58 @@ public static class QuestionModerationEndpoints
             CancellationToken ct) =>
         {
             if (!IsTeacherOrAdmin(user)) return Results.Forbid();
-            var pageSize = Math.Clamp(limit ?? 50, 1, 100);
-            var pageOffset = Math.Max(offset ?? 0, 0);
-            var questions = await db.Questions.AsNoTracking()
-                .Where(q => q.IsActive && !q.IsVerified)
-                .OrderBy(q => q.CreatedAt).ThenBy(q => q.Id)
-                .Skip(pageOffset)
-                .Take(pageSize)
-                .Select(q => new
+            try
+            {
+                var pageSize = Math.Clamp(limit ?? 50, 1, 100);
+                var pageOffset = Math.Max(offset ?? 0, 0);
+                var rawQuestions = await db.Questions.AsNoTracking()
+                    .Where(q => q.IsActive && !q.IsVerified)
+                    .OrderBy(q => q.CreatedAt).ThenBy(q => q.Id)
+                    .Skip(pageOffset)
+                    .Take(pageSize)
+                    .Select(q => new
+                    {
+                        q.Id,
+                        q.Content,
+                        q.AttachedTable,
+                        q.Format,
+                        q.Difficulty,
+                        q.Topic,
+                        q.AnswerData,
+                        q.Explanation,
+                        q.DistractorAnalysis,
+                        q.ImageUrls,
+                        q.SourceTags,
+                        q.CreatedAt,
+                        SubjectCode = q.Subject != null ? q.Subject.Code : default,
+                        SubjectName = q.Subject != null ? q.Subject.Name : string.Empty
+                    })
+                    .ToListAsync(ct);
+
+                var questions = rawQuestions.Select(q => new
                 {
-                    q.Id, q.Content, q.AttachedTable, q.Format, q.Difficulty, q.Topic,
-                    q.AnswerData, q.Explanation, q.DistractorAnalysis, q.ImageUrls,
-                    q.SourceTags, q.CreatedAt, SubjectCode = q.Subject.Code, SubjectName = q.Subject.Name
-                })
-                .ToListAsync(ct);
-            return Results.Ok(questions);
+                    q.Id,
+                    q.Content,
+                    q.AttachedTable,
+                    Format = q.Format.ToString(),
+                    Difficulty = q.Difficulty.ToString(),
+                    q.Topic,
+                    q.AnswerData,
+                    q.Explanation,
+                    q.DistractorAnalysis,
+                    q.ImageUrls,
+                    q.SourceTags,
+                    q.CreatedAt,
+                    SubjectCode = q.SubjectCode.ToString(),
+                    q.SubjectName
+                });
+
+                return Results.Ok(questions);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { message = "Lỗi khi tải danh sách câu hỏi chờ duyệt", detail = ex.Message }, statusCode: 500);
+            }
         }).WithName("ListPendingQuestions");
 
         moderation.MapPost("/{questionId:guid}/verify", async (
@@ -161,29 +198,44 @@ public static class QuestionModerationEndpoints
         {
             if (!IsTeacherOrAdmin(user)) return Results.Forbid();
 
-            var totalPending = await db.Questions.CountAsync(q => q.IsActive && !q.IsVerified, ct);
-            var totalVerified = await db.Questions.CountAsync(q => q.IsActive && q.IsVerified, ct);
-            var totalRejected = await db.Questions.CountAsync(q => !q.IsActive, ct);
-
-            var bySubject = await db.Questions.AsNoTracking()
-                .GroupBy(q => new { q.Subject.Code, q.Subject.Name })
-                .Select(g => new
-                {
-                    SubjectCode = g.Key.Code.ToString(),
-                    SubjectName = g.Key.Name,
-                    Pending = g.Count(q => q.IsActive && !q.IsVerified),
-                    Verified = g.Count(q => q.IsActive && q.IsVerified),
-                    Rejected = g.Count(q => !q.IsActive)
-                })
-                .ToListAsync(ct);
-
-            return Results.Ok(new
+            try
             {
-                TotalPending = totalPending,
-                TotalVerified = totalVerified,
-                TotalRejected = totalRejected,
-                BySubject = bySubject
-            });
+                var totalPending = await db.Questions.CountAsync(q => q.IsActive && !q.IsVerified, ct);
+                var totalVerified = await db.Questions.CountAsync(q => q.IsActive && q.IsVerified, ct);
+                var totalRejected = await db.Questions.CountAsync(q => !q.IsActive, ct);
+
+                var subjects = await db.Subjects.AsNoTracking()
+                    .Select(s => new
+                    {
+                        SubjectCode = s.Code,
+                        SubjectName = s.Name,
+                        Pending = s.Questions.Count(q => q.IsActive && !q.IsVerified),
+                        Verified = s.Questions.Count(q => q.IsActive && q.IsVerified),
+                        Rejected = s.Questions.Count(q => !q.IsActive)
+                    })
+                    .ToListAsync(ct);
+
+                var bySubject = subjects.Select(s => new
+                {
+                    SubjectCode = s.SubjectCode.ToString(),
+                    s.SubjectName,
+                    s.Pending,
+                    s.Verified,
+                    s.Rejected
+                });
+
+                return Results.Ok(new
+                {
+                    TotalPending = totalPending,
+                    TotalVerified = totalVerified,
+                    TotalRejected = totalRejected,
+                    BySubject = bySubject
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { message = "Lỗi khi lấy thống kê", detail = ex.Message }, statusCode: 500);
+            }
         }).WithName("GetQuestionModerationStats");
 
         /// <summary>Chấp nhận / Duyệt toàn bộ câu hỏi đang chờ kiểm duyệt</summary>
