@@ -185,19 +185,26 @@ public sealed class GeminiService : IGeminiService
 
         var autoSolveInstruction = autoSolve
             ? """
-            [ĐẶC BIỆT QUAN TRỌNG - CHẾ ĐỘ TỰ ĐỘNG GIẢI ĐỀ (AUTO-SOLVE)]:
-            Bộ đề thi in này CHƯA CÓ ĐÁP ÁN. Bạn là chuyên gia khảo thí hàng đầu của Bộ Giáo Dục & Đào Tạo Việt Nam:
-            1. Đọc chính xác toàn bộ chữ, công thức toán học/hóa học LaTeX, bảng số liệu từ các trang ảnh đính kèm.
-            2. TỰ ĐỘNG GIẢI TỪNG CÂU VÀ XÁC ĐỊNH ĐÁP ÁN ĐÚNG CHÍNH XÁC:
+            [ĐẶC BIỆT QUAN TRỌNG - QUY TẮC NHẬN DIỆN VÀ GIẢI ĐỀ THI IN 2 CỘT (AUTO-SOLVE)]:
+            Bộ đề thi in này CHƯA CÓ ĐÁP ÁN. Bạn là chuyên gia khảo thí và thị giác máy tính hàng đầu của Bộ Giáo Dục & Đào Tạo Việt Nam:
+            1. BỐ CỤC ĐỀ THI IN (2 CỘT):
+               - Đề thi in thường được bố trí theo dạng 2 CỘT (Cột 1 bên trái, Cột 2 bên phải).
+               - Đọc tuần tự theo thứ tự câu hỏi: Đọc hết cột 1 từ trên xuống dưới, sau đó đọc sang cột 2 từ trên xuống dưới.
+               - Chú ý các phần câu hỏi: "Phần I: Câu trắc nghiệm nhiều lựa chọn", "1. Nhận biết" (Câu 1 đến Câu 15), "2. Thông hiểu" (Câu 1 đến Câu 15)... Không bỏ sót bất kỳ câu hỏi nào.
+            2. BỎ QUA HOÀN TOÀN CÁC NÉT BÚT MỰC / KHOANH TRÒN ĐỎ:
+               - Ảnh chụp có thể có vết khoanh tròn bằng bút bi, bút chì hoặc bút đỏ của học sinh trên các phương án A, B, C, D.
+               - TUYỆT ĐỐI KHÔNG tin tưởng hoặc sao chép các vết khoanh này. Hãy giải độc lập từng câu từ đầu dựa trên kiến thức chuẩn SGK GDPT mới nhất của Bộ GD&ĐT để xác định phương án đúng chính xác nhất.
+            3. TỰ ĐỘNG GIẢI TỪNG CÂU VÀ XÁC ĐỊNH ĐÁP ÁN ĐÚNG CHÍNH XÁC:
                - Với Phần I (MULTIPLE_CHOICE): Chọn phương án đúng nhất ("correct": "A"|"B"|"C"|"D").
                - Với Phần II (TRUE_FALSE): Phân tích logic và xác định từng ý a), b), c), d) là đúng ("is_correct": true) hay sai ("is_correct": false).
                - Với Phần III (SHORT_ANSWER): Tính toán ra số liệu cụ thể, xác định giá trị số ("value"), dung sai ("tolerance"), và đơn vị đo ("unit").
-            3. Viết lời giải chi tiết ("explanation") từng bước để học sinh hiểu cách làm.
-            4. Phân tích bẫy đề thi ("distractor_analysis") chỉ ra lý do tại sao các phương án khác lại sai.
-            5. Xác định đúng chuyên đề ("topic") và độ khó ("difficulty": NHAN_BIET, THONG_HIEU, VAN_DUNG, VAN_DUNG_CAO).
+            4. LỜI GIẢI CHI TIẾT VÀ BẪY ĐỀ THI:
+               - Viết lời giải chi tiết ("explanation") từng bước để học sinh hiểu cặn kẽ bản chất.
+               - Phân tích bẫy đề thi ("distractor_analysis") chỉ ra lý do tại sao các phương án gây nhiễu khác lại sai.
+               - Gán đúng chuyên đề ("topic") và độ khó ("difficulty": NHAN_BIET, THONG_HIEU, VAN_DUNG, VAN_DUNG_CAO).
             """
             : """
-            Đọc và trích xuất nguyên văn câu hỏi và các phương án từ hình ảnh. Nếu đề bài có sẵn đáp án hãy điền vào answer_data.
+            Đọc và trích xuất nguyên văn câu hỏi và các phương án từ hình ảnh đề in 2 cột. Bỏ qua vết khoanh mực học sinh nếu có.
             """;
 
         var combinedPrompt = $"""
@@ -229,7 +236,7 @@ public sealed class GeminiService : IGeminiService
             generationConfig = new
             {
                 temperature = 0.2,
-                maxOutputTokens = 8192,
+                maxOutputTokens = 16384,
                 responseMimeType = "application/json",
                 responseSchema = QuestionExtractionSchema
             },
@@ -239,7 +246,7 @@ public sealed class GeminiService : IGeminiService
                 {
                     new
                     {
-                        text = "Bạn là chuyên gia khảo thí và thị giác máy tính của Bộ GD&ĐT Việt Nam. Nhiệm vụ: Đọc ảnh đề thi in, OCR nội dung với độ chính xác cao, tự động giải chi tiết và trả về danh sách câu hỏi theo schema JSON."
+                        text = "Bạn là chuyên gia khảo thí và thị giác máy tính của Bộ GD&ĐT Việt Nam. Nhiệm vụ: Đọc ảnh đề thi in (kể cả đề 2 cột), OCR chính xác cao, tự động giải chi tiết từ đầu không phụ thuộc vào nét khoanh mực, và trả về danh sách câu hỏi theo schema JSON."
                     }
                 }
             }
@@ -262,13 +269,63 @@ public sealed class GeminiService : IGeminiService
             .GetProperty("text")
             .GetString() ?? "[]";
 
-        var extracted = JsonSerializer.Deserialize<List<ExtractedQuestion>>(text,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var extracted = DeserializeQuestionsSafely(text);
 
         _logger.LogInformation("Gemini Vision OCR & Auto-Solve trích xuất và giải được {Count} câu hỏi",
-            extracted?.Count ?? 0);
+            extracted.Count);
 
-        return extracted ?? [];
+        return extracted;
+    }
+
+    private List<ExtractedQuestion> DeserializeQuestionsSafely(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+
+        var cleaned = text.Trim();
+        if (cleaned.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned = cleaned.Substring(7);
+        }
+        else if (cleaned.StartsWith("```"))
+        {
+            cleaned = cleaned.Substring(3);
+        }
+        if (cleaned.EndsWith("```"))
+        {
+            cleaned = cleaned.Substring(0, cleaned.Length - 3);
+        }
+        cleaned = cleaned.Trim();
+
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        try
+        {
+            return JsonSerializer.Deserialize<List<ExtractedQuestion>>(cleaned, options) ?? [];
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Lỗi phân tích cú pháp JSON từ Gemini Vision, kích hoạt bộ phục hồi ngắt quãng...");
+
+            var lastBrace = cleaned.LastIndexOf('}');
+            if (lastBrace > 0)
+            {
+                var candidate = cleaned.Substring(0, lastBrace + 1) + "]";
+                try
+                {
+                    var recovered = JsonSerializer.Deserialize<List<ExtractedQuestion>>(candidate, options);
+                    if (recovered != null && recovered.Count > 0)
+                    {
+                        _logger.LogInformation("Phục hồi thành công {Count} câu hỏi từ chuỗi JSON", recovered.Count);
+                        return recovered;
+                    }
+                }
+                catch
+                {
+                    // Ignore recovery attempt failure
+                }
+            }
+
+            return [];
+        }
     }
 
     /// <summary>

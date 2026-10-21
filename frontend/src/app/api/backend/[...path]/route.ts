@@ -68,9 +68,11 @@ async function forward(request: NextRequest, path: string[]) {
   let body: ArrayBuffer | undefined;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     body = await request.arrayBuffer();
-    const maxBodyBytes = apiPath.startsWith('admin/ingest') ? 25 * 1024 * 1024 : 4 * 1024 * 1024;
+    const maxBodyBytes = 4.2 * 1024 * 1024;
     if (body.byteLength > maxBodyBytes) {
-      return NextResponse.json({ message: 'Request payload exceeds maximum allowed size.' }, { status: 413 });
+      return NextResponse.json({
+        message: 'Dung lượng dữ liệu (vượt quá 4.2 MB) chạm ngưỡng giới hạn của hạ tầng đám mây Vercel Serverless. Hệ thống hỗ trợ tối ưu ảnh tự động, vui lòng nén hoặc giảm bớt số trang ảnh trước khi tải lên.'
+      }, { status: 413 });
     }
   }
 

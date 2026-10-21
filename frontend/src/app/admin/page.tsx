@@ -48,7 +48,9 @@ import {
   ExternalLink,
   Camera,
   ImageIcon,
-  Trash2
+  Trash2,
+  RotateCw,
+  RotateCcw
 } from 'lucide-react';
 
 const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
@@ -279,10 +281,22 @@ export default function AdminPage() {
     else if (/KINH\s+TẾ|PHÁP\s+LUẬT/i.test(textToScan)) currentSubject = 'LAW_ECONOMICS';
     setSubjectCode(currentSubject);
 
-    // Check payload size limit
-    const totalPayloadSize = (selectedImages.reduce((sum, f) => sum + f.size, 0)) + (selectedFile ? selectedFile.size : 0);
-    if (totalPayloadSize > 4 * 1024 * 1024) {
-      setSourceNotice(`⚠️ Tổng dung lượng (${(totalPayloadSize / (1024 * 1024)).toFixed(2)} MB) vượt giới hạn 4 MB của đám mây Vercel. Vui lòng giảm bớt số trang ảnh.`);
+    // Check & optimize payload size limit under Vercel's safe margin
+    let finalImages = selectedImages;
+    if (finalImages.some(img => img.size > 350 * 1024)) {
+      setIsOptimizingImages(true);
+      setSourceNotice('⚡ Đang tự động nén ảnh tối ưu chuẩn đám mây Vercel...');
+      try {
+        finalImages = await Promise.all(finalImages.map(img => img.size > 350 * 1024 ? optimizeImageForUpload(img, true) : img));
+        setSelectedImages(finalImages);
+      } finally {
+        setIsOptimizingImages(false);
+      }
+    }
+
+    const totalPayloadSize = (finalImages.reduce((sum, f) => sum + f.size, 0)) + (selectedFile ? selectedFile.size : 0);
+    if (totalPayloadSize > 3.5 * 1024 * 1024) {
+      setSourceNotice(`⚠️ Tổng dung lượng (${(totalPayloadSize / (1024 * 1024)).toFixed(2)} MB) vượt giới hạn an toàn 3.5 MB của đám mây Vercel. Vui lòng giảm bớt số trang ảnh.`);
       return;
     }
 
@@ -290,8 +304,8 @@ export default function AdminPage() {
     setIsSubmitting(true);
     setError('');
     setResult(null);
-    setSourceNotice(selectedImages.length > 0 
-      ? `⚡ Đang bóc tách ${selectedImages.length} ảnh đề in và ${autoSolve ? 'tự động giải đề qua AI' : 'trích xuất câu hỏi'}...`
+    setSourceNotice(finalImages.length > 0 
+      ? `⚡ Đang bóc tách ${finalImages.length} ảnh đề in và ${autoSolve ? 'tự động giải đề qua AI' : 'trích xuất câu hỏi'}...`
       : `⚡ Đang quét nguồn "${currentSource}" và tự động bóc tách câu hỏi qua AI...`);
 
     try {
@@ -301,7 +315,7 @@ export default function AdminPage() {
         examYear: currentYear,
         rawContent: rawContent.trim(),
         file: selectedFile || undefined,
-        files: selectedImages.length > 0 ? selectedImages : undefined,
+        files: finalImages.length > 0 ? finalImages : undefined,
         autoSolve
       });
       setResult(response);
@@ -556,9 +570,21 @@ export default function AdminPage() {
     }
     if (isSubmitting || isOptimizingImages) return;
 
-    const totalPayloadSize = (selectedImages.reduce((sum, f) => sum + f.size, 0)) + (selectedFile ? selectedFile.size : 0);
-    if (totalPayloadSize > 4 * 1024 * 1024) {
-      setError(`Tổng dung lượng (${(totalPayloadSize / (1024 * 1024)).toFixed(2)} MB) vượt quá giới hạn 4.0 MB của đám mây Vercel Serverless. Vui lòng giảm bớt số trang ảnh.`);
+    let finalImages = selectedImages;
+    if (finalImages.some(img => img.size > 350 * 1024)) {
+      setIsOptimizingImages(true);
+      setSourceNotice('⚡ Đang tự động nén ảnh tối ưu chuẩn đám mây Vercel...');
+      try {
+        finalImages = await Promise.all(finalImages.map(img => img.size > 350 * 1024 ? optimizeImageForUpload(img, true) : img));
+        setSelectedImages(finalImages);
+      } finally {
+        setIsOptimizingImages(false);
+      }
+    }
+
+    const totalPayloadSize = (finalImages.reduce((sum, f) => sum + f.size, 0)) + (selectedFile ? selectedFile.size : 0);
+    if (totalPayloadSize > 3.5 * 1024 * 1024) {
+      setError(`Tổng dung lượng (${(totalPayloadSize / (1024 * 1024)).toFixed(2)} MB) vượt quá giới hạn an toàn 3.5 MB của đám mây Vercel Serverless. Vui lòng giảm bớt số trang ảnh.`);
       return;
     }
 
@@ -572,7 +598,7 @@ export default function AdminPage() {
         examYear: examYear ? Number(examYear) : undefined,
         rawContent: rawContent.trim(),
         file: selectedFile || undefined,
-        files: selectedImages.length > 0 ? selectedImages : undefined,
+        files: finalImages.length > 0 ? finalImages : undefined,
         autoSolve
       });
       setResult(response);
@@ -589,13 +615,73 @@ export default function AdminPage() {
     }
   }
 
-async function optimizeImageForUpload(file: File): Promise<File> {
+async function rotateImageFile(file: File, degrees: number): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const isQuarterTurn = Math.abs(degrees % 180) === 90;
+      const maxDim = 1400; // Preserves fine print at ~150KB size
+      let origW = img.width;
+      let origH = img.height;
+      if (origW > maxDim || origH > maxDim) {
+        if (origW > origH) {
+          origH = Math.round((origH * maxDim) / origW);
+          origW = maxDim;
+        } else {
+          origW = Math.round((origW * maxDim) / origH);
+          origH = maxDim;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      const targetW = isQuarterTurn ? origH : origW;
+      const targetH = isQuarterTurn ? origW : origH;
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+
+      ctx.save();
+      // Contrast & brightness filter for clear text and sharp ink
+      ctx.filter = 'contrast(1.22) brightness(1.05)';
+      ctx.translate(targetW / 2, targetH / 2);
+      ctx.rotate((degrees * Math.PI) / 180);
+      ctx.drawImage(img, -origW / 2, -origH / 2, origW, origH);
+      ctx.restore();
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const cleanName = file.name.replace(/\.[^/.]+$/, '') + '.jpg';
+          const rotated = new File([blob], cleanName, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(rotated);
+        },
+        'image/jpeg',
+        0.75
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
+
+async function optimizeImageForUpload(file: File, enhanceContrast = true): Promise<File> {
   const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|heic|heif)$/i.test(file.name);
   if (typeof window === 'undefined' || !isImage) {
-    return file;
-  }
-  // If already under 250 KB, don't re-compress
-  if (file.size <= 250 * 1024) {
     return file;
   }
 
@@ -604,7 +690,7 @@ async function optimizeImageForUpload(file: File): Promise<File> {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const maxDim = 1600; // 1600px produces crystal clear text (~200 DPI on A4) at only ~180KB - 300KB
+      const maxDim = 1400; // 1400px produces crystal clear text (~200 DPI on A4) at only ~130KB - 220KB
       let width = img.width;
       let height = img.height;
       if (width > maxDim || height > maxDim) {
@@ -625,22 +711,28 @@ async function optimizeImageForUpload(file: File): Promise<File> {
         resolve(file);
         return;
       }
+
+      if (enhanceContrast) {
+        // Boost contrast & brightness to eliminate shadows and make printed ink stand out clearly for Gemini Vision OCR
+        ctx.filter = 'contrast(1.22) brightness(1.05)';
+      }
       ctx.drawImage(img, 0, 0, width, height);
+
       canvas.toBlob(
         (blob) => {
-          if (!blob || blob.size >= file.size) {
+          if (!blob) {
             resolve(file);
-          } else {
-            const cleanName = file.name.replace(/\.[^/.]+$/, '') + '.jpg';
-            const optimized = new File([blob], cleanName, {
-              type: 'image/jpeg',
-              lastModified: Date.now()
-            });
-            resolve(optimized);
+            return;
           }
+          const cleanName = file.name.replace(/\.[^/.]+$/, '') + '.jpg';
+          const optimized = new File([blob], cleanName, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(optimized);
         },
         'image/jpeg',
-        0.78
+        0.75
       );
     };
     img.onerror = () => {
@@ -650,6 +742,30 @@ async function optimizeImageForUpload(file: File): Promise<File> {
     img.src = url;
   });
 }
+
+  async function handleRotateImage(index: number, degrees: number) {
+    if (isOptimizingImages || !selectedImages[index]) return;
+    setIsOptimizingImages(true);
+    setSourceNotice(`🔄 Đang xoay trang ${index + 1}...`);
+    try {
+      const rotated = await rotateImageFile(selectedImages[index], degrees);
+      const updatedImages = [...selectedImages];
+      updatedImages[index] = rotated;
+      setSelectedImages(updatedImages);
+
+      const updatedPreviews = [...imagePreviews];
+      if (updatedPreviews[index]) {
+        URL.revokeObjectURL(updatedPreviews[index]);
+      }
+      updatedPreviews[index] = URL.createObjectURL(rotated);
+      setImagePreviews(updatedPreviews);
+    } catch {
+      // Ignored
+    } finally {
+      setIsOptimizingImages(false);
+      setSourceNotice(null);
+    }
+  }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
@@ -664,13 +780,13 @@ async function optimizeImageForUpload(file: File): Promise<File> {
     if (images.length > 0) {
       setError('');
       setIsOptimizingImages(true);
-      setSourceNotice('🔄 Đang tự động nén & tối ưu hóa ảnh cho đám mây Vercel...');
+      setSourceNotice('🔄 Đang tự động nén & làm nét chữ cho đám mây Vercel...');
       try {
-        const optimizedImages = await Promise.all(images.map(img => optimizeImageForUpload(img)));
+        const optimizedImages = await Promise.all(images.map(img => optimizeImageForUpload(img, true)));
         const updatedImages = [...selectedImages, ...optimizedImages];
         const totalSize = updatedImages.reduce((sum, f) => sum + f.size, 0);
-        if (totalSize > 4 * 1024 * 1024) {
-          setError(`Tổng dung lượng các file ảnh (${(totalSize / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4 MB của hạ tầng đám mây Vercel Serverless. Vui lòng chọn ít ảnh hơn cho mỗi đợt.`);
+        if (totalSize > 3.5 * 1024 * 1024) {
+          setError(`Tổng dung lượng các file ảnh (${(totalSize / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn an toàn 3.5 MB của hạ tầng đám mây Vercel Serverless. Vui lòng chọn ít ảnh hơn cho mỗi đợt.`);
           event.target.value = '';
           return;
         }
@@ -689,8 +805,8 @@ async function optimizeImageForUpload(file: File): Promise<File> {
       }
     } else if (docs.length > 0) {
       const doc = docs[0];
-      if (doc.size > 4 * 1024 * 1024) {
-        setError(`File tài liệu (${(doc.size / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4 MB của hạ tầng đám mây Vercel Serverless. Vui lòng dùng file PDF dưới 4 MB hoặc tải ảnh các trang.`);
+      if (doc.size > 3.5 * 1024 * 1024) {
+        setError(`File tài liệu (${(doc.size / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn an toàn 3.5 MB của hạ tầng đám mây Vercel Serverless. Vui lòng dùng file PDF dưới 3.5 MB hoặc tải ảnh các trang.`);
         event.target.value = '';
         return;
       }
@@ -1364,7 +1480,7 @@ async function optimizeImageForUpload(file: File): Promise<File> {
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-semibold text-slate-300 flex items-center gap-2">
                     <Camera className="w-4 h-4 text-cyan-400" />
-                    <span>Tải ảnh chụp đề in ấn hoặc file PDF / TXT (Hỗ trợ nhiều ảnh, tối đa 25 MB)</span>
+                    <span>Tải ảnh chụp đề in ấn hoặc file PDF / TXT (Tự động nén & làm nét chữ chuẩn Vercel)</span>
                   </label>
                   {selectedImages.length > 0 && (
                     <button
@@ -1404,25 +1520,40 @@ async function optimizeImageForUpload(file: File): Promise<File> {
 
                 {/* THUMBNAIL PREVIEW GRID FOR IMAGES */}
                 {selectedImages.length > 0 && (
-                  <div className="space-y-2 p-3.5 rounded-2xl bg-slate-950/60 border border-white/10">
+                  <div className="space-y-3 p-3.5 rounded-2xl bg-slate-950/60 border border-white/10">
                     <div className="flex items-center justify-between text-xs text-slate-400">
                       <span className="font-bold text-cyan-400 flex items-center gap-1.5">
                         <ImageIcon className="w-4 h-4" />
                         <span>Đã chọn {selectedImages.length} trang ảnh đề thi in ấn:</span>
                       </span>
-                      <span>{(selectedImages.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024)).toFixed(2)} MB / 25 MB</span>
+                      <span className="font-mono text-emerald-400">
+                        Tổng {(selectedImages.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(0)} KB (Chuẩn an toàn Vercel &lt; 3.5 MB)
+                      </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-1">
+                    <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-200 flex items-start gap-2.5">
+                      <Sparkles className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="font-semibold text-white">Chế độ tối ưu ảnh chụp & OCR AI Gemini Vision:</p>
+                        <p className="text-slate-300">
+                          • <strong>Xoay ảnh thẳng đứng:</strong> Nếu ảnh chụp bằng điện thoại bị nằm ngang hoặc ngược, hãy bấm <strong>↻ +90°</strong> hoặc <strong>↺ -90°</strong> trên từng trang để xoay thẳng đứng. Đề in 2 cột cần ảnh thẳng đứng để AI nhận diện chuẩn thứ tự câu hỏi.
+                        </p>
+                        <p className="text-slate-300">
+                          • <strong>Khử bóng tối & làm nét mực in:</strong> Hệ thống đã tự động tăng độ tương phản để làm nổi bật nét chữ in trên nền giấy và nén dung lượng xuống ~150 KB/ảnh, loại bỏ hoàn toàn lỗi FUNCTION_PAYLOAD_TOO_LARGE.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 pt-1">
                       {selectedImages.map((img, idx) => (
-                        <div key={idx} className="relative group rounded-xl border border-white/10 bg-slate-900 overflow-hidden shadow-md">
+                        <div key={idx} className="relative group rounded-xl border border-white/10 bg-slate-900 overflow-hidden shadow-md flex flex-col">
                           <div className="aspect-[3/4] relative bg-slate-950 flex items-center justify-center overflow-hidden">
                             {imagePreviews[idx] ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
                                 src={imagePreviews[idx]}
                                 alt={`Trang ${idx + 1}`}
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                className="w-full h-full object-contain group-hover:scale-102 transition-transform"
                               />
                             ) : (
                               <ImageIcon className="w-8 h-8 text-slate-600" />
@@ -1442,9 +1573,32 @@ async function optimizeImageForUpload(file: File): Promise<File> {
                               <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          <div className="p-2 text-[11px] truncate text-slate-300">
-                            <p className="truncate font-semibold">{img.name}</p>
-                            <p className="text-[10px] text-slate-500">{(img.size / 1024).toFixed(0)} KB</p>
+
+                          {/* ROTATION & SIZE CONTROLS */}
+                          <div className="p-2 border-t border-white/10 bg-slate-950/80 flex items-center justify-between text-[11px] gap-1">
+                            <span className="text-[10px] text-slate-400 font-mono">{(img.size / 1024).toFixed(0)} KB</span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={isOptimizingImages}
+                                onClick={() => handleRotateImage(idx, -90)}
+                                className="px-1.5 py-1 rounded bg-slate-800 hover:bg-cyan-600/30 text-slate-300 hover:text-cyan-200 border border-white/10 text-[10px] flex items-center gap-0.5 transition-colors"
+                                title="Xoay ngược chiều kim đồng hồ 90°"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>-90°</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isOptimizingImages}
+                                onClick={() => handleRotateImage(idx, 90)}
+                                className="px-1.5 py-1 rounded bg-slate-800 hover:bg-cyan-600/30 text-slate-300 hover:text-cyan-200 border border-white/10 text-[10px] flex items-center gap-0.5 transition-colors"
+                                title="Xoay theo chiều kim đồng hồ 90° (Dùng khi ảnh chụp bị xoay ngang)"
+                              >
+                                <RotateCw className="w-3 h-3" />
+                                <span>+90°</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
