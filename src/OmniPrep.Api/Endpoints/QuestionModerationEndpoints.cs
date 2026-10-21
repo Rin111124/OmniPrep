@@ -186,9 +186,47 @@ public static class QuestionModerationEndpoints
             });
         }).WithName("GetQuestionModerationStats");
 
+        /// <summary>Chấp nhận / Duyệt toàn bộ câu hỏi đang chờ kiểm duyệt</summary>
+        moderation.MapPost("/verify-all", async (
+            VerifyAllQuestionsRequest? req,
+            ClaimsPrincipal user,
+            OmniPrepDbContext db,
+            CancellationToken ct) =>
+        {
+            if (!IsTeacherOrAdmin(user)) return Results.Forbid();
+            var reviewerId = GetUserId(user);
+            var reviewedAt = DateTimeOffset.UtcNow;
+
+            var query = db.Questions.Where(q => q.IsActive && !q.IsVerified);
+            if (req?.QuestionIds != null && req.QuestionIds.Count > 0)
+            {
+                query = query.Where(q => req.QuestionIds.Contains(q.Id));
+            }
+            else if (!string.IsNullOrWhiteSpace(req?.SubjectCode) && Enum.TryParse<SubjectCode>(req.SubjectCode, true, out var code))
+            {
+                query = query.Where(q => q.Subject.Code == code);
+            }
+
+            var updatedCount = await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(q => q.IsVerified, true)
+                .SetProperty(q => q.ReviewedBy, reviewerId)
+                .SetProperty(q => q.ReviewedAt, reviewedAt)
+                .SetProperty(q => q.ReviewNote, (string?)null)
+                .SetProperty(q => q.UpdatedAt, reviewedAt), ct);
+
+            return Results.Ok(new
+            {
+                updatedCount,
+                reviewedBy = reviewerId,
+                reviewedAt,
+                message = $"Đã duyệt thành công {updatedCount} câu hỏi vào kho đề chính thức."
+            });
+        }).WithName("VerifyAllQuestions");
+
         return group;
     }
 
+    public sealed record VerifyAllQuestionsRequest(IReadOnlyList<Guid>? QuestionIds, string? SubjectCode);
     public sealed record RejectQuestionRequest(string? Note);
     public sealed record UpdateQuestionRequest(
         string? Content,

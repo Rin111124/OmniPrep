@@ -12,7 +12,8 @@ import {
   PendingQuestion,
   reviewQuestion,
   submitExamForIngestion,
-  updatePendingQuestion
+  updatePendingQuestion,
+  verifyAllQuestions
 } from '@/lib/api';
 import { IngestionStatusResponse, SubjectCode } from '@/types';
 import {
@@ -23,7 +24,9 @@ import {
   Save,
   X,
   FileText,
-  RefreshCw
+  RefreshCw,
+  CheckCheck,
+  Sparkles
 } from 'lucide-react';
 
 const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
@@ -52,6 +55,8 @@ export default function AdminPage() {
   const [reviewError, setReviewError] = useState('');
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [isVerifyingAll, setIsVerifyingAll] = useState(false);
+  const [verifyAllSuccess, setVerifyAllSuccess] = useState('');
 
   // Moderation stats
   const [stats, setStats] = useState<ModerationStats | null>(null);
@@ -173,6 +178,26 @@ export default function AdminPage() {
       setEditError(cause instanceof Error ? cause.message : 'Không thể lưu câu hỏi đã sửa.');
     } finally {
       setIsSavingEdit(false);
+    }
+  }
+
+  async function handleVerifyAll() {
+    if (pendingQuestions.length === 0) return;
+    const confirmMessage = `Bạn có chắc chắn muốn duyệt và xuất bản TOÀN BỘ ${pendingQuestions.length} câu hỏi đang chờ vào ngân hàng đề thi không?`;
+    if (!window.confirm(confirmMessage)) return;
+
+    setIsVerifyingAll(true);
+    setReviewError('');
+    setVerifyAllSuccess('');
+    try {
+      const res = await verifyAllQuestions();
+      setVerifyAllSuccess(res.message || `Đã duyệt thành công ${res.updatedCount} câu hỏi!`);
+      setPendingQuestions([]);
+      void refreshStats();
+    } catch (cause) {
+      setReviewError(cause instanceof Error ? cause.message : 'Không thể duyệt toàn bộ câu hỏi.');
+    } finally {
+      setIsVerifyingAll(false);
     }
   }
 
@@ -312,25 +337,61 @@ export default function AdminPage() {
               </label>
 
               {error && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-sm text-rose-200">{error}</p>}
-              {result && <p role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 p-3 text-sm text-emerald-200">Đã nhận tài liệu. Mã hồ sơ: {result.paperId}; trạng thái: {result.status}.</p>}
+              {result && (
+                <div role="status" className="rounded-2xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-sm text-emerald-200 space-y-1.5 shadow-lg">
+                  <div className="flex items-center gap-2 font-bold text-emerald-400">
+                    <Sparkles className="w-4 h-4" />
+                    <span>Bóc tách đề thi thành công!</span>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Đã trích xuất <strong className="text-white font-bold">{result.totalExtracted || 0}</strong> câu hỏi:{' '}
+                    <span className="text-emerald-400 font-bold">{result.totalNew || 0} câu mới</span> đã được nạp vào hàng chờ duyệt,{' '}
+                    <span className="text-amber-300">{result.totalMerged || 0} câu trùng lặp</span> được tự động gộp nguồn.
+                    {result.totalFailed ? <span className="text-rose-400"> ({result.totalFailed} câu lỗi)</span> : ''}
+                  </p>
+                </div>
+              )}
 
-              <button disabled={isSubmitting || !rawContent.trim() || !sourceName.trim()} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
-                {isSubmitting ? 'Đang gửi...' : 'Đưa vào hàng đợi'}
+              <button disabled={isSubmitting || !rawContent.trim() || !sourceName.trim()} className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-50 transition-all hover:scale-[1.01] active:scale-[0.99]">
+                <Sparkles className="w-4 h-4 text-indigo-300" />
+                <span>{isSubmitting ? 'AI đang bóc tách & nạp đề thi...' : 'Bóc tách & Nạp đề thi ngay'}</span>
               </button>
             </form>
           )}
 
           <section className="space-y-4">
-            <header className="flex flex-wrap items-end justify-between gap-3">
+            <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div>
                 <h2 className="text-xl font-black">Hàng chờ duyệt câu hỏi ({pendingQuestions.length})</h2>
                 <p className="mt-1 text-sm text-slate-400">Hiệu đính, kiểm tra đáp án và xuất bản vào ngân hàng đề thi.</p>
               </div>
-              <button onClick={() => void refreshPending()} disabled={isLoadingQuestions} className="flex items-center gap-1.5 rounded-xl border border-white/10 px-4 py-2 text-sm disabled:opacity-50 hover:bg-white/5">
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingQuestions ? 'animate-spin' : ''}`} />
-                <span>{isLoadingQuestions ? 'Đang tải…' : 'Tải lại'}</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {pendingQuestions.length > 0 && (
+                  <button
+                    onClick={handleVerifyAll}
+                    disabled={isVerifyingAll || isLoadingQuestions}
+                    className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-950/40 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <span>{isVerifyingAll ? 'Đang duyệt tất cả…' : `Chấp nhận toàn bộ (${pendingQuestions.length} câu)`}</span>
+                  </button>
+                )}
+                <button onClick={() => void refreshPending()} disabled={isLoadingQuestions} className="flex items-center gap-1.5 rounded-xl border border-white/10 px-4 py-2 text-sm disabled:opacity-50 hover:bg-white/5 transition-colors">
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingQuestions ? 'animate-spin' : ''}`} />
+                  <span>{isLoadingQuestions ? 'Đang tải…' : 'Tải lại'}</span>
+                </button>
+              </div>
             </header>
+
+            {verifyAllSuccess && (
+              <div role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-4 text-sm text-emerald-200 flex items-center justify-between gap-2 shadow-lg">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <span>{verifyAllSuccess}</span>
+                </div>
+                <button onClick={() => setVerifyAllSuccess('')} className="text-xs text-slate-400 hover:text-white px-2 py-1">Đóng</button>
+              </div>
+            )}
 
             {reviewError && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-sm text-rose-200">{reviewError}</p>}
             {isLoadingQuestions && pendingQuestions.length === 0 && <p className="text-sm text-slate-400">Đang tải hàng chờ duyệt…</p>}

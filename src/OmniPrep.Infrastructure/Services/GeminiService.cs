@@ -100,6 +100,7 @@ public sealed class GeminiService : IGeminiService
             generationConfig = new
             {
                 temperature = 0.1,          // Thấp để tăng tính nhất quán
+                maxOutputTokens = 8192,     // Hỗ trợ bóc tách đề dài 40-50 câu hỏi mà không bị cắt cụt JSON
                 responseMimeType = "application/json",
                 responseSchema = QuestionExtractionSchema
             },

@@ -36,6 +36,7 @@ public static class IngestionEndpoints
             OmniPrepDbContext db,
             IExamPaperRepository paperRepo,
             ISubjectRepository subjectRepo,
+            IIngestionService ingestionService,
             CancellationToken ct) =>
         {
             if (!IsAdmin(user)) return Results.Forbid();
@@ -71,8 +72,10 @@ public static class IngestionEndpoints
                 SHA256.HashData(Encoding.UTF8.GetBytes(contentToProcess))).ToLowerInvariant();
             if (contentToProcess.Length > 2 * 1024 * 1024)
                 return Results.BadRequest("Nội dung đề tối đa là 2 MB.");
-            if (await paperRepo.GetByFileHashAsync(fileHash, ct) is not null)
-                return Results.Conflict("Đề này đã được nạp trước đó.");
+
+            var existingPaper = await paperRepo.GetByFileHashAsync(fileHash, ct);
+            if (existingPaper is not null && existingPaper.Status == IngestionStatus.Completed)
+                return Results.Conflict("Đề này đã được bóc tách và nạp thành công trước đó.");
 
             var source = await db.ExamSources.FirstOrDefaultAsync(s => s.Name == sourceName, ct);
             if (source is null)
@@ -88,8 +91,7 @@ public static class IngestionEndpoints
                 await db.SaveChangesAsync(ct);
             }
 
-            // Store text durably for the background worker.
-            var paper = new ExamPaper
+            var paper = existingPaper ?? new ExamPaper
             {
                 Id = Guid.NewGuid(),
                 SourceId = source.Id,
@@ -98,19 +100,48 @@ public static class IngestionEndpoints
                 ExamYear = examYear,
                 FileHash = fileHash,
                 RawContent = contentToProcess,
-                Status = IngestionStatus.Pending,
                 SubmittedAt = DateTimeOffset.UtcNow
             };
 
-            await paperRepo.AddAsync(paper, ct);
+            paper.Status = IngestionStatus.Processing;
+            if (existingPaper is null)
+            {
+                await paperRepo.AddAsync(paper, ct);
+            }
             await paperRepo.SaveChangesAsync(ct);
 
-            return Results.Accepted(value: new
+            // Bóc tách trực tiếp bằng Gemini AI và chạy chống trùng lặp 2 tầng
+            try
             {
-                PaperId = paper.Id,
-                Status = paper.Status.ToString(),
-                Message = "Đề đã vào hàng đợi xử lý."
-            });
+                var result = await ingestionService.IngestExamPaperAsync(
+                    paper.Id, contentToProcess, code, source.Name, examYear, ct);
+
+                paper.Status = result.TotalFailed == result.TotalExtracted && result.TotalExtracted > 0
+                    ? IngestionStatus.Failed
+                    : IngestionStatus.Completed;
+                await paperRepo.SaveChangesAsync(ct);
+
+                return Results.Ok(new
+                {
+                    PaperId = paper.Id,
+                    Status = paper.Status.ToString(),
+                    TotalExtracted = result.TotalExtracted,
+                    TotalNew = result.TotalNew,
+                    TotalMerged = result.TotalMerged,
+                    TotalFailed = result.TotalFailed,
+                    Errors = result.Errors,
+                    Message = $"Bóc tách hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi."
+                });
+            }
+            catch (Exception ex)
+            {
+                paper.Status = IngestionStatus.Failed;
+                await paperRepo.SaveChangesAsync(ct);
+                return Results.Problem(
+                    title: "Bóc tách đề thi thất bại",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
         }).WithName("IngestExamPaper").DisableAntiforgery();
 
         return group;

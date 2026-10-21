@@ -558,6 +558,15 @@ export async function reviewQuestion(questionId: string, action: 'verify' | 'rej
   });
 }
 
+export async function verifyAllQuestions(questionIds?: string[], subjectCode?: string): Promise<{ updatedCount: number; message: string }> {
+  const response = await backendFetch('/admin/questions/verify-all', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questionIds, subjectCode })
+  });
+  return response.json();
+}
+
 export interface DashboardSummary {
   streakDays: number;
   targetScore: number;
