@@ -241,3 +241,29 @@ export interface ExamSource {
   websiteUrl?: string | null;
   isActive: boolean;
 }
+
+export interface ScannedSourceItem {
+  name: string;
+  province?: string | null;
+  sourceType: string;
+  totalQuestions: number;
+  part1Count: number;
+  part2Count: number;
+  part3Count: number;
+  isFullMatrix: boolean;
+  coverageScore: number;
+}
+
+export interface SubjectSourceScanResult {
+  subjectCode: string;
+  subjectName: string;
+  totalAvailableQuestions: number;
+  requiredMatrix: {
+    part1: number;
+    part2: number;
+    part3: number;
+    total: number;
+  };
+  recommendedSource: string;
+  sources: ScannedSourceItem[];
+}

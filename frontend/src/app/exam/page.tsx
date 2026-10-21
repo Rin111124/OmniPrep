@@ -1,10 +1,10 @@
 'use client';
 
-import React, { Suspense, useEffect, useState, useMemo } from 'react';
+import React, { Suspense, useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Navbar } from '@/components/Navbar';
-import { getSubjects, getExamSources } from '@/lib/api';
-import { ExamSource, Subject, SubjectCode } from '@/types';
+import { getSubjects, getExamSources, scanExamSourcesBySubject } from '@/lib/api';
+import { ExamSource, Subject, SubjectCode, SubjectSourceScanResult, ScannedSourceItem } from '@/types';
 import {
   Sparkles,
   GraduationCap,
@@ -15,7 +15,9 @@ import {
   Search,
   ArrowRight,
   Brain,
-  Loader2
+  Loader2,
+  Zap,
+  Radio
 } from 'lucide-react';
 
 const SUBJECT_ICONS: Record<string, string> = {
@@ -43,6 +45,42 @@ function ExamSetupContent() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isStarting, setIsStarting] = useState<boolean>(false);
 
+  // Auto-scan exam sources by subject state
+  const [scanResult, setScanResult] = useState<SubjectSourceScanResult | null>(null);
+  const [isScanningSources, setIsScanningSources] = useState<boolean>(false);
+  const [scanNotification, setScanNotification] = useState<string | null>(null);
+  const [onlyReadySources, setOnlyReadySources] = useState<boolean>(true);
+
+  const performScan = useCallback(async (code: SubjectCode, autoSelect: boolean = false) => {
+    setIsScanningSources(true);
+    try {
+      const res = await scanExamSourcesBySubject(code);
+      setScanResult(res);
+
+      if (autoSelect) {
+        if (res.recommendedSource && res.recommendedSource !== 'RANDOM') {
+          setSelectedSource(res.recommendedSource);
+          const top = res.sources.find(s => s.name === res.recommendedSource);
+          setScanNotification(
+            `Đã tự động chọn nguồn tối ưu: "${res.recommendedSource}" (${top?.totalQuestions ?? 0} câu hỏi sẵn sàng)`
+          );
+        } else if (res.sources.length > 0) {
+          setSelectedSource(res.sources[0].name);
+          setScanNotification(
+            `Đã tự động chọn nguồn đề "${res.sources[0].name}" (${res.sources[0].totalQuestions} câu hỏi)`
+          );
+        } else {
+          setSelectedSource('RANDOM');
+          setScanNotification(`Môn học này sẽ lấy câu hỏi ngẫu nhiên từ toàn bộ kho đề thi đã duyệt.`);
+        }
+      }
+    } catch {
+      // Ignored
+    } finally {
+      setIsScanningSources(false);
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
     Promise.all([
@@ -61,14 +99,44 @@ function ExamSetupContent() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    scanExamSourcesBySubject(selectedSubject)
+      .then(res => {
+        if (active) {
+          setScanResult(res);
+        }
+      })
+      .catch(() => {
+        // Ignored
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedSubject]);
+
   const filteredSources = useMemo(() => {
+    // If onlyReadySources is true and we have scanned sources for this subject
+    if (onlyReadySources && scanResult && scanResult.sources.length > 0) {
+      return scanResult.sources.filter(src => {
+        const matchType = sourceTypeFilter === 'all' ||
+          (sourceTypeFilter === 'so_gddt' && (src.sourceType === 'so_gd' || src.sourceType === 'bo_gd')) ||
+          (sourceTypeFilter === 'truong_chuyen' && src.sourceType === 'truong_chuyen');
+        const term = sourceSearch.trim().toLowerCase();
+        const matchSearch = !term || src.name.toLowerCase().includes(term) || (src.province && src.province.toLowerCase().includes(term));
+        return matchType && matchSearch;
+      });
+    }
+
+    // Fallback: list all sources
     return sources.filter(src => {
       const matchType = sourceTypeFilter === 'all' || src.sourceType === sourceTypeFilter;
       const term = sourceSearch.trim().toLowerCase();
       const matchSearch = !term || src.name.toLowerCase().includes(term) || (src.province && src.province.toLowerCase().includes(term));
       return matchType && matchSearch;
     });
-  }, [sources, sourceTypeFilter, sourceSearch]);
+  }, [onlyReadySources, scanResult, sources, sourceTypeFilter, sourceSearch]);
 
   const activeSubjectData = subjects.find(s => s.code === selectedSubject);
 
@@ -179,45 +247,94 @@ function ExamSetupContent() {
                     2
                   </span>
                   <div>
-                    <h2 className="text-lg font-bold text-white">Chọn Nguồn Đề Thi</h2>
-                    <p className="text-xs text-slate-400">Tùy chọn đề tổng hợp toàn quốc hoặc luyện sâu theo từng Sở/Trường</p>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold text-white">Chọn Nguồn Đề Thi</h2>
+                      {scanResult && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-medium">
+                          {scanResult.sources.length} nguồn có đề
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      Tự động quét ngân hàng câu hỏi theo môn học hoặc chọn tự do theo Sở/Trường.
+                    </p>
                   </div>
                 </div>
 
-                {/* Filter chips */}
-                <div className="flex items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-white/10 self-start sm:self-auto text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Smart Auto-Scan & Select Button */}
                   <button
-                    onClick={() => setSourceTypeFilter('all')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      sourceTypeFilter === 'all'
-                        ? 'bg-indigo-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
+                    type="button"
+                    onClick={() => void performScan(selectedSubject, true)}
+                    disabled={isScanningSources}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-bold text-xs shadow-lg shadow-indigo-950/50 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+                    title="Tự động quét ngân hàng đề và chọn nguồn tối ưu nhất cho môn này"
                   >
-                    Tất cả
+                    <Zap className={`w-3.5 h-3.5 text-yellow-300 ${isScanningSources ? 'animate-bounce' : ''}`} />
+                    <span>{isScanningSources ? 'Đang quét nguồn…' : '⚡ Tự Động Quét Nguồn'}</span>
                   </button>
-                  <button
-                    onClick={() => setSourceTypeFilter('so_gddt')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      sourceTypeFilter === 'so_gddt'
-                        ? 'bg-indigo-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    🏛️ Sở GD&ĐT
-                  </button>
-                  <button
-                    onClick={() => setSourceTypeFilter('truong_chuyen')}
-                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                      sourceTypeFilter === 'truong_chuyen'
-                        ? 'bg-indigo-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    🎓 Trường Chuyên
-                  </button>
+
+                  {/* Filter chips */}
+                  <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-white/10 text-xs">
+                    <button
+                      onClick={() => setSourceTypeFilter('all')}
+                      className={`px-2 py-0.5 rounded-lg font-semibold transition-all ${
+                        sourceTypeFilter === 'all'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Tất cả
+                    </button>
+                    <button
+                      onClick={() => setSourceTypeFilter('so_gddt')}
+                      className={`px-2 py-0.5 rounded-lg font-semibold transition-all ${
+                        sourceTypeFilter === 'so_gddt'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🏛️ Sở GD
+                    </button>
+                    <button
+                      onClick={() => setSourceTypeFilter('truong_chuyen')}
+                      className={`px-2 py-0.5 rounded-lg font-semibold transition-all ${
+                        sourceTypeFilter === 'truong_chuyen'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🎓 Chuyên
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              {/* Scanning status banner */}
+              {isScanningSources && (
+                <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 text-xs text-indigo-300 animate-pulse">
+                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400 shrink-0" />
+                  <span>
+                    Đang quét ngân hàng câu hỏi để định vị các nguồn đề thi chuẩn cho môn <strong>{activeSubjectData?.name || selectedSubject}</strong>...
+                  </span>
+                </div>
+              )}
+
+              {/* Toast / Notification when auto-selected */}
+              {scanNotification && (
+                <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 shadow-xl shadow-emerald-950/20">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{scanNotification}</span>
+                  </div>
+                  <button
+                    onClick={() => setScanNotification(null)}
+                    className="text-slate-400 hover:text-white px-2 py-0.5 text-[11px]"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              )}
 
               {/* DEFAULT RANDOM OPTION */}
               <div
@@ -240,7 +357,9 @@ function ExamSetupContent() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-                      Hệ thống tự động trích lọc và phối trộn ngẫu nhiên từ 180+ Sở GD&ĐT và Trường chuyên danh tiếng, ưu tiên rút câu hỏi trọng tâm xuất hiện ở nhiều đề thi.
+                      {scanResult && scanResult.totalAvailableQuestions > 0
+                        ? `Trích lọc và phối trộn ngẫu nhiên từ kho ${scanResult.totalAvailableQuestions} câu hỏi đã duyệt của môn ${activeSubjectData?.name || ''}, tự động ưu tiên câu hỏi trọng tâm xuất hiện ở nhiều Sở.`
+                        : 'Hệ thống tự động trích lọc và phối trộn ngẫu nhiên từ các Sở GD&ĐT và Trường chuyên danh tiếng.'}
                     </p>
                   </div>
                 </div>
@@ -257,61 +376,119 @@ function ExamSetupContent() {
                 </div>
               </div>
 
-              {/* SEARCH SOURCES */}
+              {/* TOGGLE & SEARCH */}
               <div className="space-y-3">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={sourceSearch}
-                    onChange={e => setSourceSearch(e.target.value)}
-                    placeholder="Tìm theo tên Sở (Hà Nội, Nam Định, Nghệ An...) hoặc Trường chuyên..."
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/90 border border-white/10 text-white placeholder-slate-500 text-xs sm:text-sm focus:outline-none focus:border-cyan-400 transition-all"
-                  />
-                  {sourceSearch && (
-                    <button
-                      onClick={() => setSourceSearch('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white"
-                    >
-                      Xóa
-                    </button>
-                  )}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={sourceSearch}
+                      onChange={e => setSourceSearch(e.target.value)}
+                      placeholder="Tìm theo tên Sở (Hà Nội, Bắc Ninh, Nghệ An...) hoặc Trường chuyên..."
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/90 border border-white/10 text-white placeholder-slate-500 text-xs sm:text-sm focus:outline-none focus:border-cyan-400 transition-all"
+                    />
+                    {sourceSearch && (
+                      <button
+                        onClick={() => setSourceSearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white"
+                      >
+                        Xóa
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Toggle only ready sources */}
+                  <button
+                    type="button"
+                    onClick={() => setOnlyReadySources(prev => !prev)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                      onlyReadySources
+                        ? 'border-cyan-500/40 bg-cyan-950/30 text-cyan-300'
+                        : 'border-white/10 bg-slate-900 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Radio className={`w-3.5 h-3.5 ${onlyReadySources ? 'text-cyan-400' : 'text-slate-500'}`} />
+                    <span>{onlyReadySources ? 'Đang lọc nguồn có đề' : 'Hiện toàn bộ danh mục'}</span>
+                  </button>
                 </div>
 
                 {/* SCROLLABLE SOURCES LIST */}
-                <div className="max-h-60 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 custom-scrollbar">
+                <div className="max-h-72 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 custom-scrollbar">
                   {filteredSources.map(src => {
                     const isSelected = selectedSource === src.name;
+                    const scanned = 'totalQuestions' in src ? (src as unknown as ScannedSourceItem) : null;
+                    const isRecommended = scanResult?.recommendedSource === src.name;
+
                     return (
                       <div
-                        key={src.id}
+                        key={'id' in src ? String(src.id) : src.name}
                         onClick={() => setSelectedSource(src.name)}
-                        className={`cursor-pointer p-3 rounded-xl border text-xs transition-all flex items-center justify-between gap-2 ${
+                        className={`cursor-pointer p-3.5 rounded-2xl border text-xs transition-all flex flex-col justify-between gap-2.5 ${
                           isSelected
-                            ? 'bg-indigo-600/30 border-cyan-400 text-white shadow-md shadow-indigo-600/20'
-                            : 'bg-slate-950/60 border-white/5 hover:border-white/15 hover:bg-slate-900/60 text-slate-300'
+                            ? 'bg-gradient-to-br from-indigo-900/40 to-slate-900 border-cyan-400 text-white shadow-lg shadow-cyan-950/30 scale-[1.01]'
+                            : 'bg-slate-950/60 border-white/5 hover:border-white/20 hover:bg-slate-900/60 text-slate-300'
                         }`}
                       >
-                        <div className="min-w-0">
-                          <p className="font-semibold truncate">{src.name}</p>
-                          <p className="text-[10px] text-slate-400 truncate">
-                            {src.sourceType === 'truong_chuyen' ? '🎓 Trường Chuyên' : '🏛️ Sở GD&ĐT'}{' '}
-                            {src.province ? `• ${src.province}` : ''}
-                          </p>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-bold text-white text-xs truncate">{src.name}</p>
+                              {isRecommended && (
+                                <span className="text-[10px] text-amber-300 font-extrabold flex items-center shrink-0">
+                                  ✨ Tối ưu
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                              {src.sourceType === 'truong_chuyen' ? '🎓 Trường Chuyên' : '🏛️ Sở GD&ĐT'}{' '}
+                              {src.province ? `• ${src.province}` : ''}
+                            </p>
+                          </div>
+
+                          <div
+                            className={`w-4 h-4 rounded-full border shrink-0 flex items-center justify-center mt-0.5 ${
+                              isSelected ? 'border-cyan-400 bg-cyan-400' : 'border-slate-600'
+                            }`}
+                          >
+                            {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-[#07090e]" />}
+                          </div>
                         </div>
-                        <div
-                          className={`w-4 h-4 rounded-full border shrink-0 flex items-center justify-center ${
-                            isSelected ? 'border-cyan-400 bg-cyan-400' : 'border-slate-600'
-                          }`}
-                        >
-                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-[#07090e]" />}
-                        </div>
+
+                        {/* Scanned metrics breakdown (if available) */}
+                        {scanned && (
+                          <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[11px]">
+                            <span className={`px-2 py-0.5 rounded-md font-bold ${
+                              scanned.isFullMatrix
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                : 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20'
+                            }`}>
+                              {scanned.isFullMatrix ? '🎯 Chuẩn ma trận' : `${scanned.totalQuestions} câu`}
+                            </span>
+
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              I: {scanned.part1Count} | II: {scanned.part2Count} | III: {scanned.part3Count}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
+
                   {filteredSources.length === 0 && (
-                    <div className="col-span-full py-6 text-center text-xs text-slate-400">
-                      Không tìm thấy nguồn đề phù hợp với từ khóa &ldquo;{sourceSearch}&rdquo;.
+                    <div className="col-span-full py-8 text-center text-xs text-slate-400 space-y-2">
+                      <p>Không tìm thấy nguồn đề phù hợp với bộ lọc hiện tại.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSourceSearch('');
+                          setSourceTypeFilter('all');
+                          setOnlyReadySources(false);
+                        }}
+                        className="text-cyan-400 hover:text-cyan-300 underline font-semibold text-xs"
+                      >
+                        Bỏ lọc và xem toàn bộ nguồn
+                      </button>
                     </div>
                   )}
                 </div>

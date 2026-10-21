@@ -19,6 +19,7 @@ import {
   TopicMastery,
   TutorContext,
   ExamSource,
+  SubjectSourceScanResult,
 } from '@/types';
 
 const API_BASE = '/api/backend';
@@ -242,6 +243,12 @@ export async function getExamSources(params?: { type?: string; province?: string
   if (params?.search) query.set('search', params.search);
   const qs = query.toString();
   const response = await backendFetch(`/exam-sources${qs ? `?${qs}` : ''}`);
+  return response.json();
+}
+
+export async function scanExamSourcesBySubject(subjectCode: SubjectCode): Promise<SubjectSourceScanResult> {
+  const backendCode = backendSubjectCodes[subjectCode] || subjectCode;
+  const response = await backendFetch(`/exam-sources/scan?subjectCode=${encodeURIComponent(backendCode)}`);
   return response.json();
 }
 
