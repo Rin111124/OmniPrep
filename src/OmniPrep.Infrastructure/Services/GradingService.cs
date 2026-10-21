@@ -322,14 +322,16 @@ public sealed class GeographyStrategy : BaseSubjectStrategy
     {
         return $"""
         Bạn là chuyên gia bóc tách đề thi Địa lý THPT của Việt Nam.
-        Hãy phân tích đề thi sau và trích xuất TẤT CẢ câu hỏi theo cấu trúc JSON được chỉ định.
+        Hãy phân tích đề thi sau và trích xuất TOÀN BỘ, ĐẦY ĐỦ TẤT CẢ câu hỏi theo cấu trúc JSON được chỉ định.
+        TUYỆT ĐỐI KHÔNG BỎ SÓT BẤT KỲ CÂU NÀO dù đề thi có 28, 40 hay 50+ câu hỏi.
 
         QUY TẮC BÓC TÁCH ĐỀ ĐỊA LÝ:
-        1. Phần I (câu 1-18): Trắc nghiệm 4 lựa chọn A, B, C, D
-        2. Phần II (câu 19-22): Đúng/Sai 4 ý a, b, c, d - thường kèm bảng số liệu
-        3. Phần III (câu 23-28): Trả lời ngắn, thường yêu cầu tính toán từ số liệu
+        1. Phần I: Trắc nghiệm 4 lựa chọn A, B, C, D (format: "MULTIPLE_CHOICE")
+        2. Phần II: Đúng/Sai 4 ý a, b, c, d (format: "TRUE_FALSE") - thường kèm bảng số liệu
+        3. Phần III: Trả lời ngắn số/chữ (format: "SHORT_ANSWER") - thường yêu cầu tính toán từ số liệu
         
         ĐẶC BIỆT LƯU Ý:
+        - Bóc tách đầy đủ tất cả câu hỏi từ đầu đến cuối văn bản, không tóm tắt hay dừng giữa chừng.
         - Nếu câu hỏi có bảng số liệu: Copy nguyên xi nội dung bảng vào trường "attached_table" (dạng Markdown table)
         - Phân loại chuyên đề chính xác: "Địa lý tự nhiên Việt Nam", "Địa lý dân cư Việt Nam", 
           "Địa lý kinh tế Việt Nam", "Địa lý các vùng kinh tế", "Địa lý biển và hải đảo",
@@ -357,14 +359,16 @@ public sealed class GdktplStrategy : BaseSubjectStrategy
     {
         return $"""
         Bạn là chuyên gia bóc tách đề thi Giáo dục Kinh tế và Pháp luật (GDKT&PL) THPT Việt Nam.
-        Hãy phân tích đề thi sau và trích xuất TẤT CẢ câu hỏi theo cấu trúc JSON được chỉ định.
+        Hãy phân tích đề thi sau và trích xuất TOÀN BỘ, ĐẦY ĐỦ TẤT CẢ câu hỏi theo cấu trúc JSON được chỉ định.
+        TUYỆT ĐỐI KHÔNG BỎ SÓT BẤT KỲ CÂU NÀO dù đề thi có 28, 40 hay 50+ câu hỏi.
 
         QUY TẮC BÓC TÁCH ĐỀ GDKT&PL:
-        1. Phần I (câu 1-18): Trắc nghiệm 4 lựa chọn, thường là tình huống pháp luật hoặc khái niệm KT
-        2. Phần II (câu 19-22): Đúng/Sai về tình huống, hành vi đúng/sai theo pháp luật
-        3. Phần III (câu 23-28): Bài toán kinh tế ngắn (tính lãi suất, thuế, giá...) hoặc tình huống phức tạp
+        1. Phần I: Trắc nghiệm 4 lựa chọn (format: "MULTIPLE_CHOICE"), thường là tình huống pháp luật hoặc khái niệm KT
+        2. Phần II: Đúng/Sai về tình huống, hành vi đúng/sai theo pháp luật (format: "TRUE_FALSE")
+        3. Phần III: Bài toán kinh tế ngắn hoặc tình huống phức tạp (format: "SHORT_ANSWER")
         
         ĐẶC BIỆT LƯU Ý:
+        - Bóc tách đầy đủ tất cả câu hỏi từ đầu đến cuối văn bản, không tóm tắt hay dừng giữa chừng.
         - Giữ nguyên tên nhân vật (A, B, anh/chị X...) trong câu hỏi tình huống
         - Phân loại chuyên đề: "Kinh tế vi mô cơ bản", "Kinh tế vĩ mô cơ bản", "Tài chính - Ngân hàng",
           "Pháp luật Hình sự", "Pháp luật Dân sự", "Pháp luật Hành chính", "Hiến pháp và quyền công dân",

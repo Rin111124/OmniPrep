@@ -82,14 +82,48 @@ public sealed class GeminiService : IGeminiService
 
     /// <summary>
     /// Bóc tách câu hỏi từ nội dung document sử dụng Gemini Structured Output.
+    /// Hỗ trợ tự động phân đoạn đề thi (Phần I, II, III) để bóc tách triệt để 40-50+ câu hỏi mà không bị giới hạn token.
     /// </summary>
     public async Task<IReadOnlyList<ExtractedQuestion>> ExtractQuestionsAsync(
         string documentContent,
         SubjectCode subjectCode,
         CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(documentContent))
+            return [];
+
+        // Kiểm tra nếu đề thi có các phần rõ rệt (Phần I, II, III hoặc Phần 1, 2, 3)
+        var sectionRegex = new System.Text.RegularExpressions.Regex(
+            @"(?=(?:PHẦN|Phần)\s+[I|V|X|1-3]+(?:\.|\:|\s))",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        var rawSections = sectionRegex.Split(documentContent)
+            .Where(s => !string.IsNullOrWhiteSpace(s) && s.Trim().Length > 50)
+            .ToList();
+
+        if (rawSections.Count >= 2)
+        {
+            _logger.LogInformation("Phát hiện {Count} phần thi trong văn bản đề, tiến hành bóc tách phân đoạn tăng công suất", rawSections.Count);
+            var allQuestions = new List<ExtractedQuestion>();
+            foreach (var section in rawSections)
+            {
+                var chunkQuestions = await ExtractQuestionsChunkAsync(section, subjectCode, ct);
+                allQuestions.AddRange(chunkQuestions);
+            }
+            _logger.LogInformation("Tổng số câu hỏi bóc tách qua tất cả các phần: {Count}", allQuestions.Count);
+            return allQuestions;
+        }
+
+        return await ExtractQuestionsChunkAsync(documentContent, subjectCode, ct);
+    }
+
+    private async Task<IReadOnlyList<ExtractedQuestion>> ExtractQuestionsChunkAsync(
+        string chunkContent,
+        SubjectCode subjectCode,
+        CancellationToken ct)
+    {
         var strategy = _strategyFactory.GetStrategy(subjectCode);
-        var prompt = strategy.BuildExtractionPrompt(documentContent);
+        var prompt = strategy.BuildExtractionPrompt(chunkContent);
 
         var requestBody = new
         {
@@ -112,7 +146,7 @@ public sealed class GeminiService : IGeminiService
 
         var url = $"{_options.BaseUrl}/models/{_options.GenerativeModel}:generateContent?key={_options.ApiKey}";
 
-        _logger.LogInformation("Gọi Gemini API bóc tách đề - Model: {Model}", _options.GenerativeModel);
+        _logger.LogInformation("Gọi Gemini API bóc tách phân đoạn - Model: {Model}", _options.GenerativeModel);
 
         var response = await _httpClient.PostAsJsonAsync(url, requestBody, ct);
         response.EnsureSuccessStatusCode();
@@ -131,7 +165,7 @@ public sealed class GeminiService : IGeminiService
         var extracted = JsonSerializer.Deserialize<List<ExtractedQuestion>>(text,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-        _logger.LogInformation("Gemini trả về {Count} câu hỏi", extracted?.Count ?? 0);
+        _logger.LogInformation("Gemini trích xuất được {Count} câu hỏi trong phân đoạn", extracted?.Count ?? 0);
         return extracted ?? [];
     }
 

@@ -18,6 +18,7 @@ import {
   ScoreHistoryItem,
   TopicMastery,
   TutorContext,
+  ExamSource,
 } from '@/types';
 
 const API_BASE = '/api/backend';
@@ -48,6 +49,7 @@ interface BackendQuestion {
   difficulty: string;
   topic: string;
   imageUrls?: string[];
+  sourceTags?: string[];
   options?: Record<string, string> | null;
   statements?: Array<{ id: string; text: string }> | null;
   unit?: string;
@@ -156,7 +158,7 @@ function mapBackendQuestion(raw: BackendQuestion): Question {
       unit: raw.unit
     },
     imageUrls: raw.imageUrls || [],
-    sourceTags: []
+    sourceTags: raw.sourceTags || []
   };
 }
 
@@ -201,12 +203,19 @@ export async function getSubjects(): Promise<Subject[]> {
 }
 
 export async function generateExam(
-  subjectCode: SubjectCode
+  subjectCode: SubjectCode,
+  sourceName?: string
 ): Promise<{ examId: string; attemptId: string; questions: Question[]; expiresAt?: string; durationMinutes?: number }> {
+  const payload: { subjectCode: string; sourceName?: string } = {
+    subjectCode: backendSubjectCodes[subjectCode]
+  };
+  if (sourceName && sourceName.trim() && sourceName !== 'RANDOM' && sourceName !== 'ALL') {
+    payload.sourceName = sourceName.trim();
+  }
   const response = await backendFetch('/exams/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subjectCode: backendSubjectCodes[subjectCode] })
+    body: JSON.stringify(payload)
   });
   const data: { examId: string; questions: BackendQuestion[]; expiresAt?: string; durationMinutes?: number } = await response.json();
   const startResponse = await backendFetch('/attempts/start', {
@@ -224,6 +233,16 @@ export async function generateExam(
     expiresAt: data.expiresAt,
     durationMinutes: data.durationMinutes
   };
+}
+
+export async function getExamSources(params?: { type?: string; province?: string; search?: string }): Promise<ExamSource[]> {
+  const query = new URLSearchParams();
+  if (params?.type) query.set('type', params.type);
+  if (params?.province) query.set('province', params.province);
+  if (params?.search) query.set('search', params.search);
+  const qs = query.toString();
+  const response = await backendFetch(`/exam-sources${qs ? `?${qs}` : ''}`);
+  return response.json();
 }
 
 interface BackendAttemptState {

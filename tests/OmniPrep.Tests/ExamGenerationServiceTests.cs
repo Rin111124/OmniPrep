@@ -97,7 +97,7 @@ public class ExamGenerationServiceTests
         }
 
         public Task<IReadOnlyList<Question>> DrawForExamAsync(
-            Guid subjectId, Guid userId, QuestionFormat format, int count, CancellationToken ct = default)
+            Guid subjectId, Guid userId, QuestionFormat format, int count, string? sourceName = null, CancellationToken ct = default)
         {
             var returnCount = format switch
             {

@@ -91,6 +91,7 @@ public sealed class QuestionRepository : IQuestionRepository
         Guid userId,
         QuestionFormat format,
         int count,
+        string? sourceName = null,
         CancellationToken ct = default)
     {
         // 1. Thống kê câu đã làm đúng kèm thời điểm làm đúng gần nhất
@@ -106,18 +107,50 @@ public sealed class QuestionRepository : IQuestionRepository
 
         var correctQuestionIds = correctStats.Select(s => s.QuestionId).ToHashSet();
 
-        // 2. Rút câu ngẫu nhiên từ các câu chưa làm hoặc đã làm sai
-        var selectedQuestions = await _db.Questions
-            .Where(q => q.SubjectId == subjectId
-                     && q.Format == format
-                     && q.IsActive
-                     && q.IsVerified
-                     && !correctQuestionIds.Contains(q.Id))
-            .OrderBy(_ => EF.Functions.Random())
-            .Take(count)
-            .ToListAsync(ct);
+        var cleanSource = sourceName?.Trim();
+        var isSpecificSource = !string.IsNullOrWhiteSpace(cleanSource)
+            && !cleanSource.Equals("RANDOM", StringComparison.OrdinalIgnoreCase)
+            && !cleanSource.Equals("ALL", StringComparison.OrdinalIgnoreCase)
+            && !cleanSource.Contains("ngẫu nhiên", StringComparison.OrdinalIgnoreCase);
 
-        // 3. FALLBACK: Nếu số câu chưa làm đúng không đủ số lượng ma trận
+        var selectedQuestions = new List<Question>();
+
+        // 2a. Nếu người dùng chọn nguồn đề cụ thể: Ưu tiên rút câu thuộc nguồn đó
+        if (isSpecificSource)
+        {
+            selectedQuestions = await _db.Questions
+                .Where(q => q.SubjectId == subjectId
+                         && q.Format == format
+                         && q.IsActive
+                         && q.IsVerified
+                         && !correctQuestionIds.Contains(q.Id)
+                         && (q.SourceTags.Contains(cleanSource!) || q.SourceTags.Any(t => t.Contains(cleanSource!))))
+                .OrderBy(_ => EF.Functions.Random())
+                .Take(count)
+                .ToListAsync(ct);
+        }
+
+        // 2b. Nếu không chọn nguồn hoặc nguồn đã chọn không đủ số câu: Rút từ kho đề ngẫu nhiên toàn quốc
+        if (selectedQuestions.Count < count)
+        {
+            var needed = count - selectedQuestions.Count;
+            var currentIds = selectedQuestions.Select(q => q.Id).ToHashSet();
+
+            var generalQuestions = await _db.Questions
+                .Where(q => q.SubjectId == subjectId
+                         && q.Format == format
+                         && q.IsActive
+                         && q.IsVerified
+                         && !correctQuestionIds.Contains(q.Id)
+                         && !currentIds.Contains(q.Id))
+                .OrderBy(_ => EF.Functions.Random())
+                .Take(needed)
+                .ToListAsync(ct);
+
+            selectedQuestions.AddRange(generalQuestions);
+        }
+
+        // 3. FALLBACK: Nếu số câu chưa làm đúng vẫn không đủ số lượng ma trận
         if (selectedQuestions.Count < count)
         {
             var needed = count - selectedQuestions.Count;

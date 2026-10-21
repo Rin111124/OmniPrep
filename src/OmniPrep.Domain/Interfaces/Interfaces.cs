@@ -26,10 +26,10 @@ public interface IQuestionRepository
         FindSimilarAsync(float[] embedding, Guid subjectId, double threshold = 0.08, int limit = 5, CancellationToken ct = default);
 
     /// <summary>
-    /// Rút câu hỏi ngẫu nhiên theo format, loại những câu user đã làm đúng
+    /// Rút câu hỏi ngẫu nhiên theo format, loại những câu user đã làm đúng, hỗ trợ lọc theo nguồn đề cụ thể
     /// </summary>
     Task<IReadOnlyList<Question>> DrawForExamAsync(
-        Guid subjectId, Guid userId, QuestionFormat format, int count, CancellationToken ct = default);
+        Guid subjectId, Guid userId, QuestionFormat format, int count, string? sourceName = null, CancellationToken ct = default);
 
     Task AddAsync(Question question, CancellationToken ct = default);
     Task UpdateAsync(Question question, CancellationToken ct = default);
@@ -227,6 +227,7 @@ public interface IExamGenerationService
     Task<GeneratedExam> GenerateExamAsync(
         Guid userId,
         SubjectCode subjectCode,
+        string? sourceName = null,
         CancellationToken ct = default);
 }
 

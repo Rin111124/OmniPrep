@@ -15,7 +15,7 @@ async function forward(request: NextRequest, path: string[]) {
     return NextResponse.json({ message: 'Invalid API path.' }, { status: 400 });
   }
   const apiPath = path.join('/');
-  const allowed = ['subjects', 'exams', 'attempts', 'dashboard', 'users/me', 'mistakes', 'admin/ingest', 'admin/questions'];
+  const allowed = ['subjects', 'exams', 'attempts', 'dashboard', 'users/me', 'mistakes', 'admin/ingest', 'admin/questions', 'exam-sources'];
   if (!allowed.some(prefix => apiPath === prefix || apiPath.startsWith(`${prefix}/`))) {
     return NextResponse.json({ message: 'API route is not available through this proxy.' }, { status: 404 });
   }
@@ -26,7 +26,7 @@ async function forward(request: NextRequest, path: string[]) {
     }
   }
 
-  const publicCatalogRead = request.method === 'GET' && apiPath === 'subjects';
+  const publicCatalogRead = request.method === 'GET' && (apiPath === 'subjects' || apiPath === 'exam-sources' || apiPath.startsWith('exam-sources/'));
   let accessToken: string | undefined;
   if (!publicCatalogRead) {
     const cookieStore = await cookies();
@@ -40,6 +40,14 @@ async function forward(request: NextRequest, path: string[]) {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
       return NextResponse.json({ message: 'Sign in is required.' }, { status: 401 });
+    }
+
+    // Defense-in-depth: Verify role at proxy layer for admin endpoints
+    if (apiPath.startsWith('admin/')) {
+      const userRole = (user.app_metadata?.role || user.user_metadata?.role || '').toString().toUpperCase();
+      if (userRole !== 'ADMIN' && userRole !== 'TEACHER') {
+        return NextResponse.json({ message: 'Access denied. Administrator privileges required.' }, { status: 403 });
+      }
     }
 
     const { data: { session } } = await supabase.auth.getSession();
@@ -60,8 +68,9 @@ async function forward(request: NextRequest, path: string[]) {
   let body: ArrayBuffer | undefined;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     body = await request.arrayBuffer();
-    if (body.byteLength > 4 * 1024 * 1024) {
-      return NextResponse.json({ message: 'Request is too large.' }, { status: 413 });
+    const maxBodyBytes = apiPath.startsWith('admin/ingest') ? 10 * 1024 * 1024 : 4 * 1024 * 1024;
+    if (body.byteLength > maxBodyBytes) {
+      return NextResponse.json({ message: 'Request payload exceeds maximum allowed size.' }, { status: 413 });
     }
   }
 
@@ -79,6 +88,13 @@ async function forward(request: NextRequest, path: string[]) {
     if (value) responseHeaders.set(name, value);
   }
   responseHeaders.set('cache-control', 'no-store');
+  // Essential HTTP Security Headers
+  responseHeaders.set('X-Content-Type-Options', 'nosniff');
+  responseHeaders.set('X-Frame-Options', 'DENY');
+  responseHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  responseHeaders.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  responseHeaders.set('X-XSS-Protection', '1; mode=block');
+
   const responseBody = [204, 205, 304].includes(upstream.status) ? null : upstream.body;
   return new NextResponse(responseBody, { status: upstream.status, headers: responseHeaders });
 }

@@ -53,8 +53,8 @@ public static class IngestionEndpoints
             {
                 if (!string.Equals(Path.GetExtension(file.FileName), ".txt", StringComparison.OrdinalIgnoreCase))
                     return Results.BadRequest("Hiện chỉ hỗ trợ file .txt hoặc dán nội dung văn bản.");
-                if (file.Length > 2 * 1024 * 1024)
-                    return Results.BadRequest("Kích thước file tối đa là 2 MB.");
+                if (file.Length > 10 * 1024 * 1024)
+                    return Results.BadRequest("Kích thước file tối đa là 10 MB.");
                 title = file.FileName;
                 using var reader = new StreamReader(file.OpenReadStream());
                 contentToProcess = await reader.ReadToEndAsync(ct);
@@ -70,8 +70,8 @@ public static class IngestionEndpoints
 
             var fileHash = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(contentToProcess))).ToLowerInvariant();
-            if (contentToProcess.Length > 2 * 1024 * 1024)
-                return Results.BadRequest("Nội dung đề tối đa là 2 MB.");
+            if (contentToProcess.Length > 10 * 1024 * 1024)
+                return Results.BadRequest("Nội dung đề tối đa là 10 MB.");
 
             var existingPaper = await paperRepo.GetByFileHashAsync(fileHash, ct);
             if (existingPaper is not null && existingPaper.Status == IngestionStatus.Completed)

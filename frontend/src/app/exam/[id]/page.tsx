@@ -27,6 +27,7 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
   const subjectParam = (searchParams.get('subject') as SubjectCode) || 'GEOGRAPHY';
   const modeParam = searchParams.get('mode'); // 'mistakes' | 'drill' | null
   const topicParam = searchParams.get('topic');
+  const sourceParam = searchParams.get('source');
 
   const subjectCode = subjectParam;
   const [examId, setExamId] = useState<string>(examIdParam);
@@ -112,7 +113,7 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
           return;
         }
 
-        const examData = await generateExam(subjectCode);
+        const examData = await generateExam(subjectCode, sourceParam || undefined);
         if (!active) return;
         setExamId(examData.examId);
         setAttemptId(examData.attemptId);
@@ -334,9 +335,14 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
                 <span className="text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
                   2025
                 </span>
+                {sourceParam && (
+                  <span className="text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 whitespace-nowrap">
+                    🏛️ {sourceParam}
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
-                Thời gian làm bài: 50 phút • 3 phần thi theo ma trận chuẩn
+                Thời gian làm bài: 50 phút • 3 phần thi theo ma trận chuẩn {sourceParam ? `• Nguồn: ${sourceParam}` : ''}
               </p>
             </div>
           </div>

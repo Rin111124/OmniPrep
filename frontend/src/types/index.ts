@@ -227,3 +227,12 @@ export interface DrillConfig {
   count: number;
   format?: QuestionFormat;
 }
+
+export interface ExamSource {
+  id: string;
+  name: string;
+  province?: string | null;
+  sourceType: string;
+  websiteUrl?: string | null;
+  isActive: boolean;
+}

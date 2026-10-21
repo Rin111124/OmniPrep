@@ -33,6 +33,7 @@ public sealed class ExamGenerationService : IExamGenerationService
     public async Task<GeneratedExam> GenerateExamAsync(
         Guid userId,
         SubjectCode subjectCode,
+        string? sourceName = null,
         CancellationToken ct = default)
     {
         var subject = await _subjectRepo.GetByCodeAsync(subjectCode, ct)
@@ -40,15 +41,15 @@ public sealed class ExamGenerationService : IExamGenerationService
 
         var matrix = subject.ExamMatrix;
 
-        // Rút câu theo từng phần của ma trận
+        // Rút câu theo từng phần của ma trận (ưu tiên nguồn đề nếu được chọn)
         var part1Questions = await _questionRepo.DrawForExamAsync(
-            subject.Id, userId, QuestionFormat.MultipleChoice, matrix.Part1.Count, ct);
+            subject.Id, userId, QuestionFormat.MultipleChoice, matrix.Part1.Count, sourceName, ct);
 
         var part2Questions = await _questionRepo.DrawForExamAsync(
-            subject.Id, userId, QuestionFormat.TrueFalse, matrix.Part2.Count, ct);
+            subject.Id, userId, QuestionFormat.TrueFalse, matrix.Part2.Count, sourceName, ct);
 
         var part3Questions = await _questionRepo.DrawForExamAsync(
-            subject.Id, userId, QuestionFormat.ShortAnswer, matrix.Part3.Count, ct);
+            subject.Id, userId, QuestionFormat.ShortAnswer, matrix.Part3.Count, sourceName, ct);
 
         if (part1Questions.Count != matrix.Part1.Count
             || part2Questions.Count != matrix.Part2.Count

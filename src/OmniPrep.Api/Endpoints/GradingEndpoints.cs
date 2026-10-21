@@ -48,7 +48,7 @@ public static class GradingEndpoints
                     var q = byId[id];
                     return new
                     {
-                        q.Id, q.SubjectId, q.Content, q.AttachedTable, q.Format, q.Difficulty, q.Topic, q.ImageUrls,
+                        q.Id, q.SubjectId, q.Content, q.AttachedTable, q.Format, q.Difficulty, q.Topic, q.ImageUrls, q.SourceTags,
                         Options = q.Format == QuestionFormat.MultipleChoice ? q.AnswerData.Options : null,
                         Statements = q.Format == QuestionFormat.TrueFalse
                             ? q.AnswerData.Statements?.Select(s => new { s.Id, s.Text }) : null

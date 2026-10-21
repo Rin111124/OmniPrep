@@ -34,7 +34,7 @@ public static class ExamsEndpoints
             Domain.Entities.GeneratedExam exam;
             try
             {
-                exam = await service.GenerateExamAsync(userId, subjectCode, ct);
+                exam = await service.GenerateExamAsync(userId, subjectCode, req.SourceName, ct);
             }
             catch (InvalidOperationException ex)
             {
@@ -67,6 +67,7 @@ public static class ExamsEndpoints
                         q.Difficulty,
                         q.Topic,
                         q.ImageUrls,
+                        q.SourceTags,
                         // Trả về options cho MC, statements cho TF
                         // KHÔNG trả về đáp án đúng (correct, is_correct)
                         Options = q.Format == QuestionFormat.MultipleChoice
@@ -83,5 +84,5 @@ public static class ExamsEndpoints
         return group;
     }
 
-    public sealed record GenerateExamRequest(string SubjectCode);
+    public sealed record GenerateExamRequest(string SubjectCode, string? SourceName = null);
 }

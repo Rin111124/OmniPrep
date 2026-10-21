@@ -10,7 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Bound request buffering for endpoints accessed without the Next.js BFF as well.
 builder.WebHost.ConfigureKestrel(options =>
-    options.Limits.MaxRequestBodySize = 3 * 1024 * 1024);
+    options.Limits.MaxRequestBodySize = 10 * 1024 * 1024);
 
 // ============================================================
 // DỊCH VỤ (Services)
@@ -104,6 +104,12 @@ var app = builder.Build();
 
 app.Use(async (context, next) =>
 {
+    // Security headers
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
+    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
+
     try
     {
         await next();
@@ -120,7 +126,7 @@ app.Use(async (context, next) =>
             {
                 error = ex.GetType().FullName,
                 message = ex.Message,
-                stackTrace = ex.StackTrace
+                stackTrace = app.Environment.IsDevelopment() ? ex.StackTrace : null
             });
         }
     }
