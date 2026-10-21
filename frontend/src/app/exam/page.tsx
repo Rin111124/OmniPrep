@@ -150,6 +150,33 @@ function ExamSetupContent() {
     router.push(`/exam/exam-bgd-2025?${params.toString()}`);
   };
 
+  const handleScanAndStartExamImmediately = async (subjectToScan: SubjectCode) => {
+    setIsStarting(true);
+    setIsScanningSources(true);
+    try {
+      const res = await scanExamSourcesBySubject(subjectToScan);
+      setScanResult(res);
+
+      let targetSource = 'RANDOM';
+      if (res.recommendedSource) {
+        targetSource = res.recommendedSource;
+      } else if (res.sources.length > 0) {
+        targetSource = res.sources[0].name;
+      }
+
+      const params = new URLSearchParams();
+      params.set('subject', subjectToScan);
+      if (targetSource !== 'RANDOM') {
+        params.set('source', targetSource);
+      }
+      router.push(`/exam/exam-bgd-2025?${params.toString()}`);
+    } catch {
+      router.push(`/exam/exam-bgd-2025?subject=${subjectToScan}`);
+    } finally {
+      setIsScanningSources(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#07090e] text-white">
       <Navbar />
@@ -260,16 +287,31 @@ function ExamSetupContent() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                id="btn-auto-scan-exam-page"
-                onClick={() => void performScan(selectedSubject, true)}
-                disabled={isScanningSources}
-                className="w-full md:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-black text-sm shadow-xl shadow-indigo-950/60 transition-all hover:scale-[1.03] active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shrink-0 border border-cyan-400/30"
-              >
-                <Zap className={`w-4 h-4 text-yellow-300 ${isScanningSources ? 'animate-bounce' : ''}`} />
-                <span>{isScanningSources ? 'Đang quét ngân hàng đề...' : '⚡ Nhấn để Quét & Chọn Nguồn Tự Động'}</span>
-              </button>
+              <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
+                <button
+                  type="button"
+                  id="btn-scan-and-start-exam-now"
+                  onClick={() => void handleScanAndStartExamImmediately(selectedSubject)}
+                  disabled={isStarting || isScanningSources}
+                  className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-500 hover:from-emerald-500 hover:to-cyan-400 text-white font-black text-xs shadow-xl shadow-teal-950/60 transition-all hover:scale-[1.03] active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 border border-emerald-400/40"
+                  title="Quét nguồn tối ưu và chuyển thẳng vào làm bài thi trong 1 chạm"
+                >
+                  <Sparkles className={`w-4 h-4 text-yellow-300 ${isStarting || isScanningSources ? 'animate-spin' : ''}`} />
+                  <span>{isStarting ? 'Đang tạo phòng thi...' : '🚀 Quét nguồn & Vào thi luôn'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-auto-scan-exam-page"
+                  onClick={() => void performScan(selectedSubject, true)}
+                  disabled={isScanningSources}
+                  className="w-full sm:w-auto px-4 py-3 rounded-2xl bg-indigo-900/60 hover:bg-indigo-800/80 border border-white/10 text-white font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                  title="Chỉ quét và điền nguồn vào Bước 2 để tự chọn"
+                >
+                  <Zap className={`w-3.5 h-3.5 text-yellow-300 ${isScanningSources ? 'animate-bounce' : ''}`} />
+                  <span>⚡ Chỉ quét nguồn</span>
+                </button>
+              </div>
             </div>
 
             {/* STEP 2: CHỌN NGUỒN ĐỀ THI */}

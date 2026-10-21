@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { Navbar } from '@/components/Navbar';
 import { RoleGuard } from '@/components/RoleGuard';
 import { useAuth } from '@/context/AuthContext';
@@ -52,6 +53,7 @@ const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
 ];
 
 export default function AdminPage() {
+  const router = useRouter();
   const { role, isLoading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<'questions' | 'provenance'>('questions');
   const [subjectCode, setSubjectCode] = useState<SubjectCode>('GEOGRAPHY');
@@ -195,6 +197,83 @@ export default function AdminPage() {
       setSourceNotice(`🔍 Đã tự động nhận diện từ văn bản: ${msg.join(' • ')}`);
     } else {
       setSourceNotice('Không tìm thấy thông tin Sở/Trường trong văn bản. Bạn có thể nhấn "⚡ Quét nguồn theo môn" để chọn từ danh mục có sẵn.');
+    }
+  };
+
+  const handleScanExtractAndSelectExam = async () => {
+    // 1. Check if user has uploaded a file or pasted text
+    const hasContent = Boolean(selectedFile) || rawContent.trim().length > 0;
+    if (!hasContent) {
+      setSourceNotice('⚠️ Vui lòng chọn file đề thi (.pdf/.txt) hoặc dán nội dung văn bản đề trước khi tự động bóc tách.');
+      return;
+    }
+
+    // 2. Auto-detect source & year & subject from content if not already filled
+    let currentSource = sourceName.trim();
+    let currentYear = examYear ? Number(examYear) : undefined;
+    let currentSubject = subjectCode;
+
+    const textToScan = `${selectedFile?.name || ''}\n${rawContent || ''}`;
+    // If sourceName is empty, run detection
+    if (!currentSource) {
+      const yearMatch = textToScan.match(/(?:năm\s+học|năm|khóa)\s*(?:20\d\d[-–])?\s*(202\d)/i) || textToScan.match(/\b(202\d)\b/);
+      if (yearMatch) {
+        currentYear = Number(yearMatch[1]);
+        setExamYear(yearMatch[1]);
+      }
+      const soMatch = textToScan.match(/SỞ\s+(?:GIÁO\s+DỤC\s+(?:VÀ|&)\s+ĐÀO\s+TẠO|GD\s*&?\s*ĐT)\s+([A-ZÀ-Ỹ\s]+?)(?:\s+TRƯỜNG|\s+ĐỀ|\s+KỲ|\s*\n|$)/i);
+      if (soMatch) {
+        const prov = soMatch[1].trim().replace(/[-–_]/g, ' ');
+        currentSource = `Sở GD&ĐT ${prov.charAt(0).toUpperCase() + prov.slice(1).toLowerCase()}`;
+      } else if (/BỘ\s+GIÁO\s+DỤC\s+(?:VÀ|&)\s+ĐÀO\s+TẠO/i.test(textToScan)) {
+        currentSource = 'Bộ Giáo Dục & Đào Tạo';
+      } else {
+        const thptMatch = textToScan.match(/TRƯỜNG\s+THPT\s+(?:CHUYÊN\s+)?([A-ZÀ-Ỹ\s]+?)(?:\s+ĐỀ|\s+KỲ|\s*\n|$)/i);
+        if (thptMatch) {
+          const school = thptMatch[1].trim();
+          currentSource = `THPT ${school.charAt(0).toUpperCase() + school.slice(1).toLowerCase()}`;
+        } else {
+          currentSource = selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '') : `Đề thi môn ${supportedSubjects.find(s => s.code === subjectCode)?.label}`;
+        }
+      }
+      if (currentYear) currentSource = `${currentSource} ${currentYear}`;
+      setSourceName(currentSource);
+    }
+
+    // Detect subject if not set
+    if (/ĐỊA\s+L[ÍÝ]/i.test(textToScan)) currentSubject = 'GEOGRAPHY';
+    else if (/LỊCH\s+SỬ/i.test(textToScan)) currentSubject = 'HISTORY';
+    else if (/TOÁN/i.test(textToScan)) currentSubject = 'MATHEMATICS';
+    else if (/VẬT\s+L[ÍÝ]/i.test(textToScan)) currentSubject = 'PHYSICS';
+    else if (/HÓA\s+HỌC/i.test(textToScan)) currentSubject = 'CHEMISTRY';
+    else if (/SINH\s+HỌC/i.test(textToScan)) currentSubject = 'BIOLOGY';
+    else if (/TIẾNG\s+ANH/i.test(textToScan)) currentSubject = 'ENGLISH';
+    else if (/KINH\s+TẾ|PHÁP\s+LUẬT/i.test(textToScan)) currentSubject = 'LAW_ECONOMICS';
+    setSubjectCode(currentSubject);
+
+    // 3. Trigger Ingestion extraction directly
+    setIsSubmitting(true);
+    setError('');
+    setResult(null);
+    setSourceNotice(`⚡ Đang quét nguồn "${currentSource}" và tự động bóc tách câu hỏi qua AI...`);
+
+    try {
+      const response = await submitExamForIngestion({
+        subjectCode: currentSubject,
+        sourceName: currentSource,
+        examYear: currentYear,
+        rawContent: rawContent.trim(),
+        file: selectedFile || undefined
+      });
+      setResult(response);
+      setSourceNotice(`✅ Bóc tách hoàn tất: ${response.totalExtracted || 0} câu hỏi từ nguồn "${currentSource}". Đã sẵn sàng để chọn đề thi làm bài ngay!`);
+      void refreshPending();
+      void loadIngestedPapers();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Không thể bóc tách đề thi.');
+      setSourceNotice(null);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -538,6 +617,19 @@ export default function AdminPage() {
                       <Search className="w-3.5 h-3.5 text-emerald-400" />
                       <span>🔍 Quét từ văn bản đề</span>
                     </button>
+
+                    {/* BUTTON 4: QUÉT NGUỒN VÀ TỰ BÓC TÁCH LUÔN */}
+                    <button
+                      type="button"
+                      id="btn-admin-scan-and-extract"
+                      onClick={() => void handleScanExtractAndSelectExam()}
+                      disabled={isSubmitting || isScanningSource}
+                      className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-black text-xs shadow-lg shadow-emerald-950/60 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+                      title="Tự động quét nguồn và kích hoạt bóc tách AI câu hỏi ngay lập tức"
+                    >
+                      <Sparkles className={`w-3.5 h-3.5 text-yellow-300 ${isSubmitting ? 'animate-spin' : ''}`} />
+                      <span>{isSubmitting ? 'Đang bóc tách đề...' : '⚡ Quét nguồn & Bóc tách luôn'}</span>
+                    </button>
                   </div>
                 </div>
 
@@ -852,6 +944,38 @@ export default function AdminPage() {
                       </ul>
                     </details>
                   )}
+                  {/* DIRECT EXAM ACTION (CHỌN ĐỀ THI LUÔN) */}
+                  <div className="pt-3 border-t border-emerald-500/30 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/40 p-3.5 rounded-2xl border border-white/10 shadow-inner">
+                    <div className="text-xs">
+                      <p className="font-bold text-white flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>Đã bóc tách đề xong! Bạn có thể chọn đề thi này để làm bài ngay:</span>
+                      </p>
+                      <p className="text-slate-300 text-[11px] mt-0.5">
+                        Môn: <strong className="text-cyan-300">{supportedSubjects.find(s => s.code === subjectCode)?.label}</strong> • Nguồn: <strong className="text-white">{sourceName || 'Đề vừa bóc tách'}</strong>
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (pendingQuestions.length > 0) {
+                            try {
+                              await verifyAllQuestions();
+                            } catch {
+                              // Continue anyway
+                            }
+                          }
+                          router.push(`/exam/exam-bgd-2025?subject=${subjectCode}&source=${encodeURIComponent(sourceName)}`);
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-black text-xs shadow-lg shadow-emerald-950/60 flex items-center gap-2 transition-all hover:scale-[1.03] active:scale-[0.98]"
+                      >
+                        <Sparkles className="w-4 h-4 text-yellow-300 animate-pulse" />
+                        <span>🎯 Chọn đề này & Vào phòng thi ngay</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1124,7 +1248,7 @@ export default function AdminPage() {
                             <td className="px-4 py-3.5 text-slate-400 text-[11px]">
                               {new Date(paper.submittedAt).toLocaleString('vi-VN')}
                             </td>
-                            <td className="px-4 py-3.5 text-right">
+                            <td className="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
                               <button
                                 onClick={() => void handleInspectPaper(paper.id)}
                                 disabled={inspectingPaperId === paper.id}
@@ -1132,6 +1256,17 @@ export default function AdminPage() {
                               >
                                 <Eye className="w-3.5 h-3.5" />
                                 <span>{inspectingPaperId === paper.id ? 'Đang đọc…' : 'Xem đề gốc'}</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  router.push(`/exam/exam-bgd-2025?subject=${paper.subjectCode}&source=${encodeURIComponent(paper.sourceName)}`);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold text-emerald-300 transition-colors"
+                                title="Chọn đề thi này để vào phòng thi làm bài ngay"
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                                <span>🎯 Thi đề này</span>
                               </button>
                             </td>
                           </tr>
@@ -1189,7 +1324,17 @@ export default function AdminPage() {
                   </pre>
                 </div>
 
-                <div className="flex justify-end pt-2 border-t border-white/10 shrink-0">
+                <div className="flex items-center justify-between pt-2 border-t border-white/10 shrink-0">
+                  <button
+                    onClick={() => {
+                      router.push(`/exam/exam-bgd-2025?subject=${selectedPaperDetails.subjectCode}&source=${encodeURIComponent(selectedPaperDetails.sourceName)}`);
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md shadow-emerald-950/50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                    <span>🎯 Chọn đề này để thi thử ngay</span>
+                  </button>
+
                   <button
                     onClick={() => setSelectedPaperDetails(null)}
                     className="rounded-xl border border-white/10 bg-slate-900 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5"
