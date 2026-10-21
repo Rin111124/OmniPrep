@@ -405,11 +405,14 @@ public static class IngestionEndpoints
         catch (Exception ex)
         {
             paper.Status = IngestionStatus.Failed;
-            await paperRepo.SaveChangesAsync(ct);
-            return Results.Problem(
-                title: "Bóc tách đề thi thất bại",
-                detail: ex.Message,
-                statusCode: StatusCodes.Status500InternalServerError);
+            try { await paperRepo.SaveChangesAsync(ct); } catch { /* ignore secondary db fail */ }
+            return Results.Json(new
+            {
+                title = "Bóc tách đề thi thất bại",
+                message = $"Lỗi trong quá trình bóc tách đề thi: {ex.Message}",
+                detail = ex.ToString(),
+                status = 500
+            }, statusCode: StatusCodes.Status500InternalServerError);
         }
     }
 

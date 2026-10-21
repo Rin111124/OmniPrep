@@ -74,13 +74,24 @@ async function forward(request: NextRequest, path: string[]) {
     }
   }
 
-  const upstream = await fetch(target, {
-    method: request.method,
-    headers,
-    body,
-    cache: 'no-store',
-    signal: request.signal
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, {
+      method: request.method,
+      headers,
+      body,
+      cache: 'no-store',
+      signal: request.signal
+    });
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Connection failed';
+    return NextResponse.json(
+      {
+        message: `Không thể kết nối đến backend (.NET API tại ${target.origin}): ${errorMsg}. Vui lòng kiểm tra backend service đã được khởi động chưa.`
+      },
+      { status: 502 }
+    );
+  }
 
   const responseHeaders = new Headers();
   for (const name of ['content-type', 'cache-control', 'retry-after', 'location']) {

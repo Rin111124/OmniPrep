@@ -76,7 +76,7 @@ public sealed class IngestionService : IIngestionService
         var errors = new List<string>();
 
         // =====================================================
-        // BƯỚC 1: Bóc tách câu hỏi từ document qua Gemini API
+        // BƯỚC 1: Bóc tách câu hỏi từ document qua Gemini API (kèm Fallback)
         // =====================================================
         IReadOnlyList<ExtractedQuestion> extractedQuestions;
         try
@@ -88,9 +88,16 @@ public sealed class IngestionService : IIngestionService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Lỗi khi gọi Gemini API bóc tách đề");
-            // Let the worker apply bounded retry and lease recovery to transient provider failures.
-            throw;
+            _logger.LogWarning(ex, "Gemini API không khả dụng hoặc lỗi: {Msg}. Tự động kích hoạt Rule-Based Extractor dự phòng.", ex.Message);
+            extractedQuestions = RuleBasedQuestionExtractor.Extract(documentContent, subjectCode, subject.Topics);
+            totalExtracted = extractedQuestions.Count;
+            _logger.LogInformation("Rule-Based Extractor trích xuất được {Count} câu hỏi dự phòng", totalExtracted);
+        }
+
+        if (extractedQuestions.Count == 0)
+        {
+            extractedQuestions = RuleBasedQuestionExtractor.Extract(documentContent, subjectCode, subject.Topics);
+            totalExtracted = extractedQuestions.Count;
         }
 
         if (extractedQuestions.Count == 0)
@@ -182,22 +189,40 @@ public sealed class IngestionService : IIngestionService
         // ----------------------------------------
         // TẦNG 2: Semantic Deduplication (pgvector)
         // ----------------------------------------
-        var embedding = await _embeddingService.GetEmbeddingAsync(extracted.Content, ct);
-
-        var similar = await _questionRepo.FindSimilarAsync(
-            embedding, subject.Id, threshold: 0.08, limit: 3, ct);
-
-        if (similar.Count > 0)
+        float[]? embedding = null;
+        try
         {
-            // Câu hỏi bị xào nấu/đổi số liệu -> Gộp nguồn vào câu gốc
-            var mostSimilar = similar[0];
-            var tag = BuildSourceTag(sourceName, examYear);
-            await _questionRepo.MergeSourceTagsAsync(mostSimilar.QuestionId, tag, ct);
+            embedding = await _embeddingService.GetEmbeddingAsync(extracted.Content, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Không thể tạo embedding qua Gemini (chưa cấu hình API Key hoặc lỗi mạng). Bỏ qua Semantic Dedup.");
+        }
 
-            _logger.LogInformation(
-                "Semantic trùng: {Similarity:F1}% - Gộp nguồn '{Tag}' vào câu {Id}",
-                mostSimilar.SimilarityPercent, tag, mostSimilar.QuestionId);
-            return false;
+        if (embedding is not null && embedding.Length > 0)
+        {
+            try
+            {
+                var similar = await _questionRepo.FindSimilarAsync(
+                    embedding, subject.Id, threshold: 0.08, limit: 3, ct);
+
+                if (similar.Count > 0)
+                {
+                    // Câu hỏi bị xào nấu/đổi số liệu -> Gộp nguồn vào câu gốc
+                    var mostSimilar = similar[0];
+                    var tag = BuildSourceTag(sourceName, examYear);
+                    await _questionRepo.MergeSourceTagsAsync(mostSimilar.QuestionId, tag, ct);
+
+                    _logger.LogInformation(
+                        "Semantic trùng: {Similarity:F1}% - Gộp nguồn '{Tag}' vào câu {Id}",
+                        mostSimilar.SimilarityPercent, tag, mostSimilar.QuestionId);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Lỗi khi so sánh similarity pgvector: {Msg}", ex.Message);
+            }
         }
 
         // ----------------------------------------
@@ -218,7 +243,15 @@ public sealed class IngestionService : IIngestionService
             foreach (var variant in variants)
             {
                 var variantHash = ComputeSha256(variant.Content);
-                var variantEmbedding = await _embeddingService.GetEmbeddingAsync(variant.Content, ct);
+                float[]? variantEmbedding = null;
+                try
+                {
+                    variantEmbedding = await _embeddingService.GetEmbeddingAsync(variant.Content, ct);
+                }
+                catch
+                {
+                    // Ignore embedding failure on mutation
+                }
                 var variantSource = $"{sourceName} (Biến thể AI)";
                 var variantQuestion = MapToQuestion(variant, subject.Id, variantHash, variantEmbedding, variantSource, examYear);
                 await _questionRepo.AddAsync(variantQuestion, ct);
@@ -234,13 +267,13 @@ public sealed class IngestionService : IIngestionService
     }
 
     /// <summary>
-    /// Map ExtractedQuestion (từ Gemini) -> Question Entity
+    /// Map ExtractedQuestion (từ Gemini / Rule-Based) -> Question Entity
     /// </summary>
     private static Question MapToQuestion(
         ExtractedQuestion extracted,
         Guid subjectId,
         string contentHash,
-        float[] embedding,
+        float[]? embedding,
         string sourceName,
         short? examYear)
     {
@@ -261,7 +294,7 @@ public sealed class IngestionService : IIngestionService
             Explanation = extracted.Explanation,
             DistractorAnalysis = extracted.DistractorAnalysis ?? new(),
             ContentHash = contentHash,
-            ContentEmbedding = new Vector(embedding),
+            ContentEmbedding = (embedding is not null && embedding.Length > 0) ? new Vector(embedding) : null,
             SourceTags = [sourceTag],
             FirstSeenYear = examYear,
             OccurrenceCount = 1,
