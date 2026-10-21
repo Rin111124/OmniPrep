@@ -22,10 +22,8 @@ public static class SubjectsEndpoints
             ISubjectRepository repo,
             OmniPrepDbContext db,
             IEnumerable<ISubjectStrategy> strategies,
-            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var logger = loggerFactory.CreateLogger("SubjectsEndpoints");
             try
             {
                 var data = await repo.GetAllActiveAsync(ct);
@@ -65,12 +63,11 @@ public static class SubjectsEndpoints
                 });
                 return Results.Ok(response);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                logger.LogError(ex, "Subject catalog failed to load");
                 return Results.Problem(
                     title: "Subject catalog unavailable",
-                    detail: ex.ToString(),
+                    detail: "The subject catalog could not be loaded.",
                     statusCode: StatusCodes.Status503ServiceUnavailable);
             }
         }).WithName("GetSubjects").AllowAnonymous();

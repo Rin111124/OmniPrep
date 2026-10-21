@@ -114,13 +114,10 @@ public class SubjectConfiguration : IEntityTypeConfiguration<Subject>
                 v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default),
                 v => JsonSerializer.Deserialize<ExamMatrix>(v, JsonSerializerOptions.Default) ?? new());
 
-        // Array: topics
+        // Array: topics — Npgsql 9 natively maps text[] <-> List<string>
         builder.Property(s => s.Topics)
             .HasColumnName("topics")
-            .HasColumnType("text[]")
-            .HasConversion(
-                v => v.ToArray(),
-                v => v.ToList());
+            .HasColumnType("text[]");
 
         builder.HasIndex(s => s.Code).IsUnique();
     }
@@ -172,16 +169,14 @@ public class QuestionConfiguration : IEntityTypeConfiguration<Question>
                 v => JsonSerializer.Serialize(v, JsonSerializerOptions.Default),
                 v => JsonSerializer.Deserialize<Dictionary<string, string>>(v, JsonSerializerOptions.Default) ?? new());
 
-        // Array: image_urls, source_tags
+        // Array: image_urls, source_tags — Npgsql 9 natively maps text[] <-> List<string>
         builder.Property(q => q.ImageUrls)
             .HasColumnName("image_urls")
-            .HasColumnType("text[]")
-            .HasConversion(v => v.ToArray(), v => v.ToList());
+            .HasColumnType("text[]");
 
         builder.Property(q => q.SourceTags)
             .HasColumnName("source_tags")
-            .HasColumnType("text[]")
-            .HasConversion(v => v.ToArray(), v => v.ToList());
+            .HasColumnType("text[]");
 
         // Index: SHA-256 unique
         builder.HasIndex(q => q.ContentHash).IsUnique().HasDatabaseName("idx_questions_content_hash");
@@ -252,11 +247,10 @@ public class GeneratedExamConfiguration : IEntityTypeConfiguration<GeneratedExam
         builder.Property(e => e.ExpiresAt).HasColumnName("expires_at");
         builder.Property(e => e.CreatedAt).HasColumnName("created_at");
 
-        // Array: question_ids
+        // Array: question_ids — Npgsql 9 natively maps uuid[] <-> List<Guid>
         builder.Property(e => e.QuestionIds)
             .HasColumnName("question_ids")
-            .HasColumnType("uuid[]")
-            .HasConversion(v => v.ToArray(), v => v.ToList());
+            .HasColumnType("uuid[]");
 
         // JSONB: matrix_snapshot
         builder.Property(e => e.MatrixSnapshot)
