@@ -199,6 +199,8 @@ export interface IngestionPayload {
   examYear?: number;
   rawContent: string;
   file?: File;
+  files?: File[];
+  autoSolve?: boolean;
 }
 
 export interface IngestionStatusResponse {

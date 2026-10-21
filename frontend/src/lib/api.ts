@@ -594,7 +594,12 @@ export async function submitExamForIngestion(payload: IngestionPayload): Promise
   formData.append('SubjectCode', backendSubjectCodes[payload.subjectCode]);
   formData.append('SourceName', payload.sourceName);
   if (payload.examYear) formData.append('ExamYear', payload.examYear.toString());
-  if (payload.file) {
+  if (payload.autoSolve !== undefined) formData.append('autoSolve', payload.autoSolve.toString());
+  if (payload.files && payload.files.length > 0) {
+    for (const f of payload.files) {
+      formData.append('files', f, f.name);
+    }
+  } else if (payload.file) {
     formData.append('file', payload.file, payload.file.name);
   } else if (payload.rawContent) {
     formData.append('rawContent', payload.rawContent);

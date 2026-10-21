@@ -45,7 +45,10 @@ import {
   Globe,
   DownloadCloud,
   Link as LinkIcon,
-  ExternalLink
+  ExternalLink,
+  Camera,
+  ImageIcon,
+  Trash2
 } from 'lucide-react';
 
 const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
@@ -68,6 +71,9 @@ export default function AdminPage() {
   const [examYear, setExamYear] = useState('');
   const [rawContent, setRawContent] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [autoSolve, setAutoSolve] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<IngestionStatusResponse | null>(null);
@@ -147,9 +153,10 @@ export default function AdminPage() {
   };
 
   const handleAutoDetectFromContent = () => {
-    const textToScan = `${selectedFile?.name || ''}\n${rawContent || ''}`;
+    const imageNames = selectedImages.map(img => img.name).join(' ');
+    const textToScan = `${selectedFile?.name || ''}\n${imageNames}\n${rawContent || ''}`;
     if (!textToScan.trim()) {
-      setSourceNotice('Vui lòng chọn file đề thi hoặc dán nội dung văn bản đề trước khi quét.');
+      setSourceNotice('Vui lòng chọn ảnh đề in, file đề thi hoặc dán nội dung văn bản đề trước khi quét.');
       return;
     }
 
@@ -216,10 +223,10 @@ export default function AdminPage() {
   };
 
   const handleScanExtractAndSelectExam = async () => {
-    // 1. Check if user has uploaded a file or pasted text
-    const hasContent = Boolean(selectedFile) || rawContent.trim().length > 0;
+    // 1. Check if user has uploaded a file or pasted text or selected images
+    const hasContent = Boolean(selectedFile) || selectedImages.length > 0 || rawContent.trim().length > 0;
     if (!hasContent) {
-      setSourceNotice('⚠️ Vui lòng chọn file đề thi (.pdf/.txt) hoặc dán nội dung văn bản đề trước khi tự động bóc tách.');
+      setSourceNotice('⚠️ Vui lòng chọn ảnh đề thi in ấn, file .pdf/.txt hoặc dán nội dung văn bản đề trước khi tự động bóc tách.');
       return;
     }
 
@@ -228,7 +235,8 @@ export default function AdminPage() {
     let currentYear = examYear ? Number(examYear) : undefined;
     let currentSubject = subjectCode;
 
-    const textToScan = `${selectedFile?.name || ''}\n${rawContent || ''}`;
+    const imageNames = selectedImages.map(img => img.name).join(' ');
+    const textToScan = `${selectedFile?.name || ''}\n${imageNames}\n${rawContent || ''}`;
     // If sourceName is empty, run detection
     if (!currentSource) {
       const yearMatch = textToScan.match(/(?:năm\s+học|năm|khóa)\s*(?:20\d\d[-–])?\s*(202\d)/i) || textToScan.match(/\b(202\d)\b/);
@@ -248,7 +256,11 @@ export default function AdminPage() {
           const school = thptMatch[1].trim();
           currentSource = `THPT ${school.charAt(0).toUpperCase() + school.slice(1).toLowerCase()}`;
         } else {
-          currentSource = selectedFile ? selectedFile.name.replace(/\.[^/.]+$/, '') : `Đề thi môn ${supportedSubjects.find(s => s.code === subjectCode)?.label}`;
+          currentSource = selectedFile 
+            ? selectedFile.name.replace(/\.[^/.]+$/, '') 
+            : selectedImages.length > 0 
+              ? `Đề in ${selectedImages[0].name.replace(/\.[^/.]+$/, '')}`
+              : `Đề thi môn ${supportedSubjects.find(s => s.code === subjectCode)?.label}`;
         }
       }
       if (currentYear) currentSource = `${currentSource} ${currentYear}`;
@@ -270,7 +282,9 @@ export default function AdminPage() {
     setIsSubmitting(true);
     setError('');
     setResult(null);
-    setSourceNotice(`⚡ Đang quét nguồn "${currentSource}" và tự động bóc tách câu hỏi qua AI...`);
+    setSourceNotice(selectedImages.length > 0 
+      ? `⚡ Đang bóc tách ${selectedImages.length} ảnh đề in và ${autoSolve ? 'tự động giải đề qua AI' : 'trích xuất câu hỏi'}...`
+      : `⚡ Đang quét nguồn "${currentSource}" và tự động bóc tách câu hỏi qua AI...`);
 
     try {
       const response = await submitExamForIngestion({
@@ -278,7 +292,9 @@ export default function AdminPage() {
         sourceName: currentSource,
         examYear: currentYear,
         rawContent: rawContent.trim(),
-        file: selectedFile || undefined
+        file: selectedFile || undefined,
+        files: selectedImages.length > 0 ? selectedImages : undefined,
+        autoSolve
       });
       setResult(response);
       setSourceNotice(`✅ Bóc tách hoàn tất: ${response.totalExtracted || 0} câu hỏi từ nguồn "${currentSource}". Đã sẵn sàng để chọn đề thi làm bài ngay!`);
@@ -540,11 +556,15 @@ export default function AdminPage() {
         sourceName: sourceName.trim(),
         examYear: examYear ? Number(examYear) : undefined,
         rawContent: rawContent.trim(),
-        file: selectedFile || undefined
+        file: selectedFile || undefined,
+        files: selectedImages.length > 0 ? selectedImages : undefined,
+        autoSolve
       });
       setResult(response);
       setRawContent('');
       setSelectedFile(null);
+      setSelectedImages([]);
+      setImagePreviews([]);
       void refreshPending();
       void loadIngestedPapers();
     } catch (cause) {
@@ -555,36 +575,70 @@ export default function AdminPage() {
   }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      setSelectedFile(null);
+    const files = event.target.files;
+    if (!files || files.length === 0) {
       return;
     }
-    const isTxt = file.name.toLowerCase().endsWith('.txt');
-    const isPdf = file.name.toLowerCase().endsWith('.pdf');
-    if (!isTxt && !isPdf) {
-      setError('Hệ thống hỗ trợ file .txt hoặc .pdf (tối đa 10 MB).');
-      event.target.value = '';
+    const fileArray = Array.from(files);
+    const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'];
+    const images = fileArray.filter(f => imageExtensions.some(ext => f.name.toLowerCase().endsWith(ext)));
+    const docs = fileArray.filter(f => f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.txt'));
+
+    if (images.length > 0) {
+      const updatedImages = [...selectedImages, ...images];
+      const totalSize = updatedImages.reduce((sum, f) => sum + f.size, 0);
+      if (totalSize > 25 * 1024 * 1024) {
+        setError('Tổng dung lượng các file ảnh vượt quá giới hạn 25 MB.');
+        event.target.value = '';
+        return;
+      }
+      setSelectedImages(updatedImages);
+      setImagePreviews(updatedImages.map(img => URL.createObjectURL(img)));
       setSelectedFile(null);
-      return;
+      setError('');
+      if (!sourceName.trim()) {
+        const base = images[0].name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+        setSourceName(`Đề in ${base}`);
+      }
+      setRawContent(`[Đã nạp ${updatedImages.length} ảnh trang đề thi in ấn. AI Gemini Vision sẽ bóc tách chữ, bảng biểu, hình vẽ và ${autoSolve ? 'tự động giải chi tiết' : 'trích xuất câu hỏi'}].`);
+    } else if (docs.length > 0) {
+      const doc = docs[0];
+      if (doc.size > 25 * 1024 * 1024) {
+        setError('File tài liệu vượt quá giới hạn 25 MB.');
+        event.target.value = '';
+        return;
+      }
+      setSelectedFile(doc);
+      setSelectedImages([]);
+      setImagePreviews([]);
+      setError('');
+      if (!sourceName.trim()) {
+        setSourceName(doc.name.replace(/\.[^/.]+$/, ''));
+      }
+      if (doc.name.toLowerCase().endsWith('.txt')) {
+        const text = await doc.text();
+        setRawContent(text);
+      } else {
+        setRawContent(`[Tập tin PDF đính kèm: ${doc.name} - ${(doc.size / 1024).toFixed(1)} KB]`);
+      }
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File vượt quá giới hạn 10 MB.');
-      event.target.value = '';
-      setSelectedFile(null);
-      return;
-    }
-    setError('');
-    setSelectedFile(file);
-    if (!sourceName.trim()) {
-      setSourceName(file.name.replace(/\.[^/.]+$/, ''));
-    }
-    if (isTxt) {
-      const text = await file.text();
-      setRawContent(text);
+  }
+
+  function handleRemoveImage(index: number) {
+    const updated = selectedImages.filter((_, idx) => idx !== index);
+    setSelectedImages(updated);
+    setImagePreviews(updated.map(img => URL.createObjectURL(img)));
+    if (updated.length === 0) {
+      setRawContent('');
     } else {
-      setRawContent(`[Tập tin PDF đính kèm: ${file.name} - ${(file.size / 1024).toFixed(1)} KB. Máy chủ sẽ bóc tách văn bản qua PdfPig Engine]`);
+      setRawContent(`[Đã nạp ${updated.length} ảnh trang đề thi in ấn. AI Gemini Vision sẽ bóc tách chữ, bảng biểu, hình vẽ và ${autoSolve ? 'tự động giải chi tiết' : 'trích xuất câu hỏi'}].`);
     }
+  }
+
+  function handleClearAllImages() {
+    setSelectedImages([]);
+    setImagePreviews([]);
+    setRawContent('');
   }
 
   return (
@@ -1182,31 +1236,165 @@ export default function AdminPage() {
                 </div>
               )}
 
-              <label className="block text-sm text-slate-300">
-                Chọn file đề thi (.txt hoặc .pdf, tối đa 10 MB)
-                <input
-                  type="file"
-                  accept=".txt,.pdf,text/plain,application/pdf"
-                  onChange={handleFileChange}
-                  className="mt-2 block w-full text-sm text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-2 file:font-semibold file:text-white hover:file:bg-indigo-500"
-                />
-                {selectedFile && (
-                  <p className="mt-1.5 text-xs text-indigo-300 flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Đã chọn: <strong className="text-white">{selectedFile.name}</strong> ({(selectedFile.size / 1024).toFixed(1)} KB)</span>
-                  </p>
+              {/* AI AUTO-SOLVE TOGGLE BANNER */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/70 via-indigo-950/60 to-cyan-950/60 border border-purple-500/40 shadow-lg flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 rounded-xl bg-purple-600/30 border border-purple-500/40 text-purple-300 shrink-0">
+                    <Sparkles className="w-5 h-5 text-yellow-300 animate-pulse" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold uppercase tracking-wider text-white">
+                        🧠 Tự động giải đề qua AI (Auto-Solve)
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border ${
+                        autoSolve 
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                          : 'bg-slate-800 text-slate-400 border-white/10'
+                      }`}>
+                        {autoSolve ? '✨ Đang BẬT' : 'Đang TẮT'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 max-w-xl">
+                      Dành cho <strong>đề thi in ấn chưa có đáp án</strong>: AI sẽ tự giải đề, chọn đáp án đúng cho Phần I (MCQ A/B/C/D), xác định Đúng/Sai cho từng ý Phần II, tính giá trị số Phần III và tạo lời giải thích chi tiết từng bước.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0 self-end sm:self-center">
+                  <input
+                    type="checkbox"
+                    checked={autoSolve}
+                    onChange={e => setAutoSolve(e.target.checked)}
+                    className="sr-only peer"
+                    id="toggle-admin-auto-solve"
+                  />
+                  <div className="w-12 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-purple-600 peer-checked:to-cyan-500"></div>
+                </label>
+              </div>
+
+              {/* MULTI-IMAGE & FILE UPLOAD DROPZONE */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-cyan-400" />
+                    <span>Tải ảnh chụp đề in ấn hoặc file PDF / TXT (Hỗ trợ nhiều ảnh, tối đa 25 MB)</span>
+                  </label>
+                  {selectedImages.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearAllImages}
+                      className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Xóa tất cả ảnh ({selectedImages.length})</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative rounded-2xl border-2 border-dashed border-white/15 hover:border-cyan-500/50 bg-slate-900/50 p-6 transition-all text-center group">
+                  <input
+                    type="file"
+                    multiple
+                    accept=".txt,.pdf,image/png,image/jpeg,image/webp,image/bmp"
+                    onChange={handleFileChange}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    id="input-admin-exam-files"
+                  />
+                  <div className="flex flex-col items-center justify-center gap-2 pointer-events-none">
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition-transform">
+                      <Camera className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-white">
+                        Nhấp để chọn ảnh chụp đề in ấn hoặc kéo thả ảnh / file vào đây
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Hỗ trợ: JPG, PNG, WEBP, PDF, TXT • Bạn có thể chọn cùng lúc nhiều trang ảnh (Trang 1, Trang 2, Trang 3...)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* THUMBNAIL PREVIEW GRID FOR IMAGES */}
+                {selectedImages.length > 0 && (
+                  <div className="space-y-2 p-3.5 rounded-2xl bg-slate-950/60 border border-white/10">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-bold text-cyan-400 flex items-center gap-1.5">
+                        <ImageIcon className="w-4 h-4" />
+                        <span>Đã chọn {selectedImages.length} trang ảnh đề thi in ấn:</span>
+                      </span>
+                      <span>{(selectedImages.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024)).toFixed(2)} MB / 25 MB</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-1">
+                      {selectedImages.map((img, idx) => (
+                        <div key={idx} className="relative group rounded-xl border border-white/10 bg-slate-900 overflow-hidden shadow-md">
+                          <div className="aspect-[3/4] relative bg-slate-950 flex items-center justify-center overflow-hidden">
+                            {imagePreviews[idx] ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={imagePreviews[idx]}
+                                alt={`Trang ${idx + 1}`}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              />
+                            ) : (
+                              <ImageIcon className="w-8 h-8 text-slate-600" />
+                            )}
+                            <span className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-sm text-[10px] font-bold text-cyan-300 border border-white/10">
+                              Trang {idx + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveImage(idx);
+                              }}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-md bg-rose-600/90 text-white flex items-center justify-center opacity-80 hover:opacity-100 hover:scale-110 transition-all shadow-md z-20"
+                              title="Xóa trang ảnh này"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="p-2 text-[11px] truncate text-slate-300">
+                            <p className="truncate font-semibold">{img.name}</p>
+                            <p className="text-[10px] text-slate-500">{(img.size / 1024).toFixed(0)} KB</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </label>
+
+                {selectedFile && (
+                  <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2 text-indigo-300 font-semibold">
+                      <FileText className="w-4 h-4 text-cyan-400" />
+                      <span>Tập tin đính kèm: <strong className="text-white">{selectedFile.name}</strong> ({(selectedFile.size / 1024).toFixed(1)} KB)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFile(null);
+                        setRawContent('');
+                      }}
+                      className="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-950/40"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <label className="block text-sm text-slate-300">
-                Hoặc dán nội dung đề văn bản
+                Hoặc dán nội dung đề văn bản (tùy chọn nếu đã tải ảnh/file)
                 <textarea
-                  required={!selectedFile}
+                  required={!selectedFile && selectedImages.length === 0}
                   value={rawContent}
                   onChange={event => setRawContent(event.target.value)}
-                  rows={8}
+                  rows={selectedImages.length > 0 ? 3 : 7}
                   maxLength={2 * 1024 * 1024}
-                  placeholder="Dán nội dung đề thi ở đây (hoặc chọn file PDF / TXT ở trên)..."
+                  placeholder="Dán nội dung đề thi ở đây (hoặc chọn ảnh đề in / file PDF / TXT ở trên)..."
                   className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 p-3 font-mono text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/50"
                 />
               </label>
@@ -1305,11 +1493,21 @@ export default function AdminPage() {
 
               {ingestionMode === 'upload' && (
                 <button
-                  disabled={isSubmitting || (!rawContent.trim() && !selectedFile) || !sourceName.trim()}
-                  className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-50 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                  disabled={isSubmitting || (!rawContent.trim() && !selectedFile && selectedImages.length === 0) || !sourceName.trim()}
+                  className={`flex items-center gap-2.5 rounded-xl px-5 py-3 text-sm font-bold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 ${
+                    selectedImages.length > 0
+                      ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 shadow-purple-950/60'
+                      : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-950/50'
+                  }`}
                 >
-                  <Sparkles className="w-4 h-4 text-indigo-300" />
-                  <span>{isSubmitting ? 'Hệ thống đang bóc tách & nạp đề thi...' : 'Bóc tách & Nạp đề thi ngay'}</span>
+                  <Sparkles className={`w-4 h-4 ${isSubmitting ? 'animate-spin text-yellow-300' : 'text-cyan-300'}`} />
+                  <span>
+                    {isSubmitting
+                      ? (selectedImages.length > 0 ? 'AI đang bóc tách hình ảnh & tự động giải đề...' : 'Hệ thống đang bóc tách & nạp đề thi...')
+                      : (selectedImages.length > 0
+                          ? (autoSolve ? `🧠 Bóc tách ${selectedImages.length} ảnh & Tự động giải đề qua AI` : `📸 Bóc tách đề từ ${selectedImages.length} ảnh`)
+                          : 'Bóc tách & Nạp đề thi ngay')}
+                  </span>
                 </button>
               )}
             </form>

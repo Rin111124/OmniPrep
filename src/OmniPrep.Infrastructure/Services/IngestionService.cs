@@ -154,6 +154,93 @@ public sealed class IngestionService : IIngestionService
         return new IngestionResult(totalExtracted, totalNew, totalMerged, totalFailed, errors, part1Count, part2Count, part3Count);
     }
 
+    /// <inheritdoc />
+    public async Task<IngestionResult> IngestExamPaperFromImagesAsync(
+        Guid examPaperId,
+        IReadOnlyList<(byte[] Data, string MimeType)> images,
+        SubjectCode subjectCode,
+        string sourceName,
+        short? examYear,
+        bool autoSolve = true,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "Bắt đầu bóc tách & giải đề từ {Count} hình ảnh - Môn: {Subject} - Nguồn: {Source} - AutoSolve: {AutoSolve}",
+            images.Count, subjectCode, sourceName, autoSolve);
+
+        var subject = await _subjectRepo.GetByCodeAsync(subjectCode, ct)
+            ?? throw new InvalidOperationException($"Không tìm thấy môn học: {subjectCode}");
+
+        var strategy = _strategyFactory.GetStrategy(subjectCode);
+        int totalExtracted = 0, totalNew = 0, totalMerged = 0, totalFailed = 0;
+        var errors = new List<string>();
+
+        IReadOnlyList<ExtractedQuestion> extractedQuestions;
+        try
+        {
+            extractedQuestions = await _geminiService.ExtractAndSolveFromImagesAsync(
+                images, subjectCode, autoSolve, ct);
+            totalExtracted = extractedQuestions.Count;
+            _logger.LogInformation("Gemini Vision OCR đã trích xuất & giải {Count} câu hỏi từ ảnh", totalExtracted);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Lỗi khi gọi Gemini Vision OCR bóc tách ảnh");
+            throw new InvalidOperationException(
+                $"Không thể bóc tách đề từ hình ảnh qua Gemini Vision: {ex.Message}. Vui lòng kiểm tra API Key Gemini hoặc độ nét của ảnh.", ex);
+        }
+
+        if (extractedQuestions.Count == 0)
+        {
+            var msg = "Không phát hiện hoặc trích xuất được câu hỏi nào từ hình ảnh đã tải lên. Vui lòng kiểm tra độ nét và góc chụp của ảnh đề thi.";
+            errors.Add(msg);
+            _logger.LogWarning(msg);
+            return new IngestionResult(0, 0, 0, 0, errors, 0, 0, 0);
+        }
+
+        int part1Count = extractedQuestions.Count(q => string.Equals(q.Format, "MULTIPLE_CHOICE", StringComparison.OrdinalIgnoreCase));
+        int part2Count = extractedQuestions.Count(q => string.Equals(q.Format, "TRUE_FALSE", StringComparison.OrdinalIgnoreCase));
+        int part3Count = extractedQuestions.Count(q => string.Equals(q.Format, "SHORT_ANSWER", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var extracted in extractedQuestions)
+        {
+            var validation = _validator.Validate(extracted, subjectCode);
+            if (!validation.IsValid)
+            {
+                totalFailed++;
+                var errMsg = $"Câu không đạt chuẩn: {string.Join(", ", validation.Errors)} (Nội dung: '{extracted.Content[..Math.Min(40, extracted.Content.Length)]}...')";
+                errors.Add(errMsg);
+                _logger.LogWarning(errMsg);
+                continue;
+            }
+
+            try
+            {
+                var isNew = await ProcessSingleQuestionAsync(
+                    extracted, subject, sourceName, examYear, strategy, ct);
+                if (isNew)
+                    totalNew++;
+                else
+                    totalMerged++;
+            }
+            catch (Exception ex)
+            {
+                totalFailed++;
+                var errMsg = $"Lỗi xử lý câu '{extracted.Content[..Math.Min(50, extracted.Content.Length)]}...': {ex.Message}";
+                errors.Add(errMsg);
+                _logger.LogWarning(ex, errMsg);
+            }
+        }
+
+        await _questionRepo.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Hoàn thành bóc tách ảnh đề {PaperId}: Trích xuất={Total}, Mới={New}, Gộp={Merged}, Lỗi={Failed}",
+            examPaperId, totalExtracted, totalNew, totalMerged, totalFailed);
+
+        return new IngestionResult(totalExtracted, totalNew, totalMerged, totalFailed, errors, part1Count, part2Count, part3Count);
+    }
+
     /// <summary>
     /// Xử lý một câu hỏi qua đầy đủ pipeline 2 tầng chống trùng lặp.
     /// Trả về true nếu là câu mới, false nếu gộp với câu đã có.

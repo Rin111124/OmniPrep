@@ -170,6 +170,108 @@ public sealed class GeminiService : IGeminiService
     }
 
     /// <summary>
+    /// Bóc tách đề thi qua ảnh chụp / file scan và tự động giải đề (Vision OCR + Auto-Solve).
+    /// </summary>
+    public async Task<IReadOnlyList<ExtractedQuestion>> ExtractAndSolveFromImagesAsync(
+        IReadOnlyList<(byte[] Data, string MimeType)> images,
+        SubjectCode subjectCode,
+        bool autoSolve = true,
+        CancellationToken ct = default)
+    {
+        if (images.Count == 0) return [];
+
+        var strategy = _strategyFactory.GetStrategy(subjectCode);
+        var basePrompt = strategy.BuildExtractionPrompt("CÁC HÌNH ẢNH / TÀI LIỆU SCAN ĐÍNH KÈM");
+
+        var autoSolveInstruction = autoSolve
+            ? """
+            [ĐẶC BIỆT QUAN TRỌNG - CHẾ ĐỘ TỰ ĐỘNG GIẢI ĐỀ (AUTO-SOLVE)]:
+            Bộ đề thi in này CHƯA CÓ ĐÁP ÁN. Bạn là chuyên gia khảo thí hàng đầu của Bộ Giáo Dục & Đào Tạo Việt Nam:
+            1. Đọc chính xác toàn bộ chữ, công thức toán học/hóa học LaTeX, bảng số liệu từ các trang ảnh đính kèm.
+            2. TỰ ĐỘNG GIẢI TỪNG CÂU VÀ XÁC ĐỊNH ĐÁP ÁN ĐÚNG CHÍNH XÁC:
+               - Với Phần I (MULTIPLE_CHOICE): Chọn phương án đúng nhất ("correct": "A"|"B"|"C"|"D").
+               - Với Phần II (TRUE_FALSE): Phân tích logic và xác định từng ý a), b), c), d) là đúng ("is_correct": true) hay sai ("is_correct": false).
+               - Với Phần III (SHORT_ANSWER): Tính toán ra số liệu cụ thể, xác định giá trị số ("value"), dung sai ("tolerance"), và đơn vị đo ("unit").
+            3. Viết lời giải chi tiết ("explanation") từng bước để học sinh hiểu cách làm.
+            4. Phân tích bẫy đề thi ("distractor_analysis") chỉ ra lý do tại sao các phương án khác lại sai.
+            5. Xác định đúng chuyên đề ("topic") và độ khó ("difficulty": NHAN_BIET, THONG_HIEU, VAN_DUNG, VAN_DUNG_CAO).
+            """
+            : """
+            Đọc và trích xuất nguyên văn câu hỏi và các phương án từ hình ảnh. Nếu đề bài có sẵn đáp án hãy điền vào answer_data.
+            """;
+
+        var combinedPrompt = $"""
+        {autoSolveInstruction}
+
+        {basePrompt}
+        """;
+
+        var parts = new List<object>();
+        foreach (var img in images)
+        {
+            parts.Add(new
+            {
+                inlineData = new
+                {
+                    mimeType = img.MimeType,
+                    data = Convert.ToBase64String(img.Data)
+                }
+            });
+        }
+        parts.Add(new { text = combinedPrompt });
+
+        var requestBody = new
+        {
+            contents = new[]
+            {
+                new { role = "user", parts }
+            },
+            generationConfig = new
+            {
+                temperature = 0.2,
+                maxOutputTokens = 8192,
+                responseMimeType = "application/json",
+                responseSchema = QuestionExtractionSchema
+            },
+            systemInstruction = new
+            {
+                parts = new[]
+                {
+                    new
+                    {
+                        text = "Bạn là chuyên gia khảo thí và thị giác máy tính của Bộ GD&ĐT Việt Nam. Nhiệm vụ: Đọc ảnh đề thi in, OCR nội dung với độ chính xác cao, tự động giải chi tiết và trả về danh sách câu hỏi theo schema JSON."
+                    }
+                }
+            }
+        };
+
+        var url = $"{_options.BaseUrl}/models/{_options.GenerativeModel}:generateContent?key={_options.ApiKey}";
+
+        _logger.LogInformation("Gọi Gemini Vision OCR & Auto-Solve cho {Count} hình ảnh - Môn: {Subject}",
+            images.Count, subjectCode);
+
+        var response = await _httpClient.PostAsJsonAsync(url, requestBody, ct);
+        response.EnsureSuccessStatusCode();
+
+        var responseJson = await response.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(responseJson);
+        var text = doc.RootElement
+            .GetProperty("candidates")[0]
+            .GetProperty("content")
+            .GetProperty("parts")[0]
+            .GetProperty("text")
+            .GetString() ?? "[]";
+
+        var extracted = JsonSerializer.Deserialize<List<ExtractedQuestion>>(text,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        _logger.LogInformation("Gemini Vision OCR & Auto-Solve trích xuất và giải được {Count} câu hỏi",
+            extracted?.Count ?? 0);
+
+        return extracted ?? [];
+    }
+
+    /// <summary>
     /// Gọi AI Tutor giải thích lỗi sai theo chế độ Streaming.
     /// Sử dụng Server-Sent Events (streamGenerateContent).
     /// </summary>

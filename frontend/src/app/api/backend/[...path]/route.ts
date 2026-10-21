@@ -68,7 +68,7 @@ async function forward(request: NextRequest, path: string[]) {
   let body: ArrayBuffer | undefined;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     body = await request.arrayBuffer();
-    const maxBodyBytes = apiPath.startsWith('admin/ingest') ? 10 * 1024 * 1024 : 4 * 1024 * 1024;
+    const maxBodyBytes = apiPath.startsWith('admin/ingest') ? 25 * 1024 * 1024 : 4 * 1024 * 1024;
     if (body.byteLength > maxBodyBytes) {
       return NextResponse.json({ message: 'Request payload exceeds maximum allowed size.' }, { status: 413 });
     }

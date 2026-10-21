@@ -133,6 +133,15 @@ public interface IGeminiService
         SubjectCode subjectCode,
         int variantCount = 2,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Bóc tách đề thi qua ảnh chụp / file scan và tự động giải đề (Vision OCR + Auto-Solve).
+    /// </summary>
+    Task<IReadOnlyList<ExtractedQuestion>> ExtractAndSolveFromImagesAsync(
+        IReadOnlyList<(byte[] Data, string MimeType)> images,
+        SubjectCode subjectCode,
+        bool autoSolve = true,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -208,6 +217,18 @@ public interface IIngestionService
         SubjectCode subjectCode,
         string sourceName,
         short? examYear,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Bóc tách đề thi từ danh sách hình ảnh (ảnh chụp trang in) và tự động giải câu hỏi nếu chưa có đáp án.
+    /// </summary>
+    Task<IngestionResult> IngestExamPaperFromImagesAsync(
+        Guid examPaperId,
+        IReadOnlyList<(byte[] Data, string MimeType)> images,
+        SubjectCode subjectCode,
+        string sourceName,
+        short? examYear,
+        bool autoSolve = true,
         CancellationToken ct = default);
 }
 

@@ -25,14 +25,10 @@ public static class IngestionEndpoints
         var ingestion = group.MapGroup("/admin/ingest").WithTags("Admin - Ingestion").RequireAuthorization();
 
         /// <summary>
-        /// Bóc tách đề thi (hỗ trợ cả dán text trực tiếp hoặc tải file .txt/.pdf).
+        /// Bóc tách đề thi (hỗ trợ dán text trực tiếp, file .txt/.pdf hoặc tải ảnh chụp đề in ấn kèm AI tự động giải đề).
         /// </summary>
         ingestion.MapPost("/", async (
-            IFormFile? file,
-            [FromForm] string? rawContent,
-            [FromForm] string subjectCode,
-            [FromForm] string sourceName,
-            [FromForm] short? examYear,
+            HttpRequest request,
             ClaimsPrincipal user,
             OmniPrepDbContext db,
             IExamPaperRepository paperRepo,
@@ -42,62 +38,121 @@ public static class IngestionEndpoints
             CancellationToken ct) =>
         {
             if (!IsAdmin(user)) return Results.Forbid();
+
+            if (!request.HasFormContentType)
+                return Results.BadRequest("Yêu cầu phải có định dạng multipart/form-data.");
+
+            var form = await request.ReadFormAsync(ct);
+            var subjectCode = form["subjectCode"].ToString();
+            var sourceName = form["sourceName"].ToString();
+            var rawContent = form["rawContent"].ToString();
+            var examYearStr = form["examYear"].ToString();
+            short? examYear = short.TryParse(examYearStr, out var parsedYear) ? parsedYear : null;
+
+            var autoSolveStr = form["autoSolve"].ToString();
+            bool autoSolve = true;
+            if (!string.IsNullOrWhiteSpace(autoSolveStr) && bool.TryParse(autoSolveStr, out var parsedAutoSolve))
+            {
+                autoSolve = parsedAutoSolve;
+            }
+
             if (!TryParseSubjectCode(subjectCode, out var code))
                 return Results.BadRequest($"Mã môn học không hợp lệ: {subjectCode}");
 
             var subject = await subjectRepo.GetByCodeAsync(code, ct);
             if (subject is null) return Results.NotFound($"Môn học không tồn tại: {subjectCode}");
 
-            string contentToProcess = string.Empty;
-            string title = "Đề thi nạp qua văn bản";
+            var files = form.Files;
+            var imageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".webp", ".bmp" };
 
-            if (file is not null && file.Length > 0)
+            // Trường hợp 1: Tải lên các file ảnh (đề in chụp lại)
+            var imageFiles = files.Where(f => imageExtensions.Contains(Path.GetExtension(f.FileName))).ToList();
+            if (imageFiles.Count > 0)
             {
-                var ext = Path.GetExtension(file.FileName);
-                if (!string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase))
+                var imageBytesList = new List<(byte[] Data, string MimeType)>();
+                foreach (var imgFile in imageFiles)
                 {
-                    return Results.BadRequest("Hệ thống hiện hỗ trợ file văn bản .txt hoặc tài liệu PDF (.pdf).");
+                    var ext = Path.GetExtension(imgFile.FileName).ToLowerInvariant();
+                    string mime = ext switch
+                    {
+                        ".png" => "image/png",
+                        ".jpg" or ".jpeg" => "image/jpeg",
+                        ".webp" => "image/webp",
+                        ".bmp" => "image/bmp",
+                        _ => "image/jpeg"
+                    };
+                    using var ms = new MemoryStream();
+                    await imgFile.CopyToAsync(ms, ct);
+                    imageBytesList.Add((ms.ToArray(), mime));
                 }
-                if (file.Length > 10 * 1024 * 1024)
+
+                string imgTitle = imageFiles.Count == 1 
+                    ? imageFiles[0].FileName 
+                    : $"{imageFiles[0].FileName} (+{imageFiles.Count - 1} ảnh)";
+
+                return await ExecuteImageIngestionPipelineAsync(
+                    imageBytesList, imgTitle, code, sourceName, examYear, autoSolve,
+                    subject, db, paperRepo, ingestionService, ct);
+            }
+
+            // Trường hợp 2: Tải lên file PDF hoặc TXT
+            var firstDocFile = files.FirstOrDefault(f => 
+                string.Equals(Path.GetExtension(f.FileName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Path.GetExtension(f.FileName), ".txt", StringComparison.OrdinalIgnoreCase));
+
+            if (firstDocFile is not null && firstDocFile.Length > 0)
+            {
+                var ext = Path.GetExtension(firstDocFile.FileName);
+                if (firstDocFile.Length > 25 * 1024 * 1024)
                 {
-                    return Results.BadRequest("Kích thước file tối đa là 10 MB.");
+                    return Results.BadRequest("Kích thước file tối đa là 25 MB.");
                 }
-                title = file.FileName;
+
+                string title = firstDocFile.FileName;
+                string contentToProcess = string.Empty;
 
                 if (string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase))
                 {
                     try
                     {
-                        contentToProcess = await pdfExtractor.ExtractTextAsync(file.OpenReadStream(), ct);
-                        if (string.IsNullOrWhiteSpace(contentToProcess))
-                        {
-                            return Results.BadRequest("File PDF không chứa lớp văn bản (text layer) hoặc đã bị khóa/scan ảnh không có text.");
-                        }
+                        contentToProcess = await pdfExtractor.ExtractTextAsync(firstDocFile.OpenReadStream(), ct);
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        return Results.BadRequest($"Không thể trích xuất văn bản từ file PDF: {ex.Message}");
+                        contentToProcess = string.Empty;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(contentToProcess))
+                    {
+                        // Scanned PDF (không có text layer): Chuyển sang Gemini Vision Multimodal OCR
+                        using var ms = new MemoryStream();
+                        await firstDocFile.CopyToAsync(ms, ct);
+                        var pdfList = new List<(byte[] Data, string MimeType)> { (ms.ToArray(), "application/pdf") };
+                        return await ExecuteImageIngestionPipelineAsync(
+                            pdfList, title, code, sourceName, examYear, autoSolve,
+                            subject, db, paperRepo, ingestionService, ct);
                     }
                 }
                 else
                 {
-                    using var reader = new StreamReader(file.OpenReadStream());
+                    using var reader = new StreamReader(firstDocFile.OpenReadStream());
                     contentToProcess = await reader.ReadToEndAsync(ct);
                 }
-            }
-            else if (!string.IsNullOrWhiteSpace(rawContent))
-            {
-                contentToProcess = rawContent;
-            }
-            else
-            {
-                return Results.BadRequest("Vui lòng tải lên file đề thi (.txt/.pdf) hoặc dán nội dung văn bản rawContent.");
+
+                return await ExecuteIngestionPipelineAsync(
+                    contentToProcess, title, null, code, sourceName, examYear,
+                    subject, db, paperRepo, ingestionService, ct);
             }
 
-            return await ExecuteIngestionPipelineAsync(
-                contentToProcess, title, null, code, sourceName, examYear,
-                subject, db, paperRepo, ingestionService, ct);
+            // Trường hợp 3: Dán nội dung text trực tiếp (rawContent)
+            if (!string.IsNullOrWhiteSpace(rawContent))
+            {
+                return await ExecuteIngestionPipelineAsync(
+                    rawContent, "Đề thi nạp qua văn bản", null, code, sourceName, examYear,
+                    subject, db, paperRepo, ingestionService, ct);
+            }
+
+            return Results.BadRequest("Vui lòng tải lên file đề thi (.txt/.pdf/ảnh chụp đề in) hoặc dán nội dung văn bản rawContent.");
         }).WithName("IngestExamPaper").DisableAntiforgery();
 
         /// <summary>
@@ -410,6 +465,107 @@ public static class IngestionEndpoints
             {
                 title = "Bóc tách đề thi thất bại",
                 message = $"Lỗi trong quá trình bóc tách đề thi: {ex.Message}",
+                detail = ex.ToString(),
+                status = 500
+            }, statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    private static async Task<IResult> ExecuteImageIngestionPipelineAsync(
+        IReadOnlyList<(byte[] Data, string MimeType)> images,
+        string title,
+        SubjectCode code,
+        string sourceName,
+        short? examYear,
+        bool autoSolve,
+        Subject subject,
+        OmniPrepDbContext db,
+        IExamPaperRepository paperRepo,
+        IIngestionService ingestionService,
+        CancellationToken ct)
+    {
+        long totalBytes = images.Sum(img => (long)img.Data.Length);
+        if (totalBytes > 25 * 1024 * 1024)
+            return Results.BadRequest("Tổng dung lượng các file ảnh/tài liệu tối đa là 25 MB.");
+
+        var hashBuilder = new StringBuilder();
+        foreach (var img in images)
+        {
+            hashBuilder.Append(Convert.ToHexString(SHA256.HashData(img.Data)));
+        }
+        var fileHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(hashBuilder.ToString()))).ToLowerInvariant();
+
+        var existingPaper = await paperRepo.GetByFileHashAsync(fileHash, ct);
+        if (existingPaper is not null && existingPaper.Status == IngestionStatus.Completed)
+            return Results.Conflict("Đề thi hình ảnh này đã được bóc tách và nạp thành công trước đó.");
+
+        var source = await db.ExamSources.FirstOrDefaultAsync(s => s.Name == sourceName, ct);
+        if (source is null)
+        {
+            source = new ExamSource
+            {
+                Id = Guid.NewGuid(),
+                Name = sourceName,
+                SourceType = images.Any(i => i.MimeType == "application/pdf") ? "scanned_pdf" : "image_scan",
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            db.ExamSources.Add(source);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var paper = existingPaper ?? new ExamPaper
+        {
+            Id = Guid.NewGuid(),
+            SourceId = source.Id,
+            SubjectId = subject.Id,
+            Title = title,
+            ExamYear = examYear,
+            FileUrl = null,
+            FileHash = fileHash,
+            RawContent = $"[Multimodal Vision OCR & AI Auto-Solve: {images.Count} ảnh/tài liệu - Tự động giải: {(autoSolve ? "Bật" : "Tắt")}]",
+            SubmittedAt = DateTimeOffset.UtcNow
+        };
+
+        paper.Status = IngestionStatus.Processing;
+        if (existingPaper is null)
+        {
+            await paperRepo.AddAsync(paper, ct);
+        }
+        await paperRepo.SaveChangesAsync(ct);
+
+        try
+        {
+            var result = await ingestionService.IngestExamPaperFromImagesAsync(
+                paper.Id, images, code, source.Name, examYear, autoSolve, ct);
+
+            paper.Status = result.TotalFailed == result.TotalExtracted && result.TotalExtracted > 0
+                ? IngestionStatus.Failed
+                : IngestionStatus.Completed;
+            await paperRepo.SaveChangesAsync(ct);
+
+            return Results.Ok(new
+            {
+                PaperId = paper.Id,
+                Status = paper.Status.ToString(),
+                TotalExtracted = result.TotalExtracted,
+                TotalNew = result.TotalNew,
+                TotalMerged = result.TotalMerged,
+                TotalFailed = result.TotalFailed,
+                Part1Count = result.Part1Count,
+                Part2Count = result.Part2Count,
+                Part3Count = result.Part3Count,
+                Errors = result.Errors,
+                Message = $"Bóc tách & giải đề qua ảnh hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi."
+            });
+        }
+        catch (Exception ex)
+        {
+            paper.Status = IngestionStatus.Failed;
+            try { await paperRepo.SaveChangesAsync(ct); } catch { /* ignore secondary db fail */ }
+            return Results.Json(new
+            {
+                title = "Bóc tách & giải đề qua hình ảnh thất bại",
+                message = $"Lỗi trong quá trình xử lý hình ảnh qua AI: {ex.Message}",
                 detail = ex.ToString(),
                 status = 500
             }, statusCode: StatusCodes.Status500InternalServerError);
