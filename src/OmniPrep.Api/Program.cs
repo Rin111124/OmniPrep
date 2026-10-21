@@ -102,6 +102,30 @@ builder.Services.AddRateLimiter(options =>
 // ============================================================
 var app = builder.Build();
 
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("GlobalException");
+        logger.LogError(ex, "Unhandled exception on {Path}", context.Request.Path);
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = ex.GetType().FullName,
+                message = ex.Message,
+                stackTrace = ex.StackTrace
+            });
+        }
+    }
+});
+
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
