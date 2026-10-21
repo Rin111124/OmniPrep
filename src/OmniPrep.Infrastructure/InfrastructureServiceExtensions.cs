@@ -32,7 +32,18 @@ public static class InfrastructureServiceExtensions
             var connStr = configuration.GetConnectionString("Supabase")
                 ?? throw new InvalidOperationException("Thiếu connection string 'Supabase'");
 
-            options.UseNpgsql(connStr, npgsql =>
+            // Cấu hình Npgsql Connection Pool chống tràn kết nối Supabase Pooler (EMAXCONNSESSION)
+            var npgsqlBuilder = new Npgsql.NpgsqlConnectionStringBuilder(connStr);
+            if (npgsqlBuilder.MaxPoolSize > 8 || npgsqlBuilder.MaxPoolSize == 100)
+            {
+                npgsqlBuilder.MaxPoolSize = 8;
+            }
+            npgsqlBuilder.MinPoolSize = 0;
+            npgsqlBuilder.ConnectionIdleLifetime = 10;
+            npgsqlBuilder.ConnectionPruningInterval = 5;
+            npgsqlBuilder.Timeout = 15;
+
+            options.UseNpgsql(npgsqlBuilder.ConnectionString, npgsql =>
             {
                 npgsql.UseVector();  // Kích hoạt pgvector
                 // Register native PostgreSQL enums with the driver as well as EF.

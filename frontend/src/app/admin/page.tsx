@@ -74,6 +74,7 @@ export default function AdminPage() {
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [autoSolve, setAutoSolve] = useState<boolean>(true);
+  const [isOptimizingImages, setIsOptimizingImages] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<IngestionStatusResponse | null>(null);
@@ -277,6 +278,13 @@ export default function AdminPage() {
     else if (/TIẾNG\s+ANH/i.test(textToScan)) currentSubject = 'ENGLISH';
     else if (/KINH\s+TẾ|PHÁP\s+LUẬT/i.test(textToScan)) currentSubject = 'LAW_ECONOMICS';
     setSubjectCode(currentSubject);
+
+    // Check payload size limit
+    const totalPayloadSize = (selectedImages.reduce((sum, f) => sum + f.size, 0)) + (selectedFile ? selectedFile.size : 0);
+    if (totalPayloadSize > 4 * 1024 * 1024) {
+      setSourceNotice(`⚠️ Tổng dung lượng (${(totalPayloadSize / (1024 * 1024)).toFixed(2)} MB) vượt giới hạn 4 MB của đám mây Vercel. Vui lòng giảm bớt số trang ảnh.`);
+      return;
+    }
 
     // 3. Trigger Ingestion extraction directly
     setIsSubmitting(true);
@@ -546,7 +554,14 @@ export default function AdminPage() {
       }
       return;
     }
-    if (isSubmitting) return;
+    if (isSubmitting || isOptimizingImages) return;
+
+    const totalPayloadSize = (selectedImages.reduce((sum, f) => sum + f.size, 0)) + (selectedFile ? selectedFile.size : 0);
+    if (totalPayloadSize > 4 * 1024 * 1024) {
+      setError(`Tổng dung lượng (${(totalPayloadSize / (1024 * 1024)).toFixed(2)} MB) vượt quá giới hạn 4.0 MB của đám mây Vercel Serverless. Vui lòng giảm bớt số trang ảnh.`);
+      return;
+    }
+
     setError('');
     setResult(null);
     setIsSubmitting(true);
@@ -575,10 +590,12 @@ export default function AdminPage() {
   }
 
 async function optimizeImageForUpload(file: File): Promise<File> {
-  if (typeof window === 'undefined' || !file.type.startsWith('image/')) {
+  const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|heic|heif)$/i.test(file.name);
+  if (typeof window === 'undefined' || !isImage) {
     return file;
   }
-  if (file.size <= 400 * 1024) {
+  // If already under 250 KB, don't re-compress
+  if (file.size <= 250 * 1024) {
     return file;
   }
 
@@ -587,7 +604,7 @@ async function optimizeImageForUpload(file: File): Promise<File> {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const maxDim = 1800;
+      const maxDim = 1600; // 1600px produces crystal clear text (~200 DPI on A4) at only ~180KB - 300KB
       let width = img.width;
       let height = img.height;
       if (width > maxDim || height > maxDim) {
@@ -614,7 +631,8 @@ async function optimizeImageForUpload(file: File): Promise<File> {
           if (!blob || blob.size >= file.size) {
             resolve(file);
           } else {
-            const optimized = new File([blob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
+            const cleanName = file.name.replace(/\.[^/.]+$/, '') + '.jpg';
+            const optimized = new File([blob], cleanName, {
               type: 'image/jpeg',
               lastModified: Date.now()
             });
@@ -622,7 +640,7 @@ async function optimizeImageForUpload(file: File): Promise<File> {
           }
         },
         'image/jpeg',
-        0.82
+        0.78
       );
     };
     img.onerror = () => {
@@ -639,36 +657,40 @@ async function optimizeImageForUpload(file: File): Promise<File> {
       return;
     }
     const fileArray = Array.from(files);
-    const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'];
-    const images = fileArray.filter(f => imageExtensions.some(ext => f.name.toLowerCase().endsWith(ext)));
+    const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.heic', '.heif'];
+    const images = fileArray.filter(f => f.type.startsWith('image/') || imageExtensions.some(ext => f.name.toLowerCase().endsWith(ext)));
     const docs = fileArray.filter(f => f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.txt'));
 
     if (images.length > 0) {
       setError('');
-      setSourceNotice('🔄 Đang tối ưu hóa độ phân giải ảnh cho AI Vision...');
-      const optimizedImages = await Promise.all(images.map(img => optimizeImageForUpload(img)));
-      setSourceNotice(null);
-
-      const updatedImages = [...selectedImages, ...optimizedImages];
-      const totalSize = updatedImages.reduce((sum, f) => sum + f.size, 0);
-      if (totalSize > 4.2 * 1024 * 1024) {
-        setError(`Tổng dung lượng các file ảnh (${(totalSize / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4.2 MB của đám mây Vercel Serverless. Vui lòng chọn ít ảnh hơn cho mỗi đợt.`);
-        event.target.value = '';
-        return;
+      setIsOptimizingImages(true);
+      setSourceNotice('🔄 Đang tự động nén & tối ưu hóa ảnh cho đám mây Vercel...');
+      try {
+        const optimizedImages = await Promise.all(images.map(img => optimizeImageForUpload(img)));
+        const updatedImages = [...selectedImages, ...optimizedImages];
+        const totalSize = updatedImages.reduce((sum, f) => sum + f.size, 0);
+        if (totalSize > 4 * 1024 * 1024) {
+          setError(`Tổng dung lượng các file ảnh (${(totalSize / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4 MB của hạ tầng đám mây Vercel Serverless. Vui lòng chọn ít ảnh hơn cho mỗi đợt.`);
+          event.target.value = '';
+          return;
+        }
+        setSelectedImages(updatedImages);
+        setImagePreviews(updatedImages.map(img => URL.createObjectURL(img)));
+        setSelectedFile(null);
+        setError('');
+        if (!sourceName.trim()) {
+          const base = images[0].name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+          setSourceName(`Đề in ${base}`);
+        }
+        setRawContent(`[Đã nạp ${updatedImages.length} ảnh trang đề thi in ấn (${(totalSize / 1024).toFixed(0)} KB đã tối ưu). AI Gemini Vision sẽ bóc tách chữ, bảng biểu, hình vẽ và ${autoSolve ? 'tự động giải chi tiết' : 'trích xuất câu hỏi'}].`);
+      } finally {
+        setIsOptimizingImages(false);
+        setSourceNotice(null);
       }
-      setSelectedImages(updatedImages);
-      setImagePreviews(updatedImages.map(img => URL.createObjectURL(img)));
-      setSelectedFile(null);
-      setError('');
-      if (!sourceName.trim()) {
-        const base = images[0].name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
-        setSourceName(`Đề in ${base}`);
-      }
-      setRawContent(`[Đã nạp ${updatedImages.length} ảnh trang đề thi in ấn (${(totalSize / 1024).toFixed(0)} KB đã tối ưu). AI Gemini Vision sẽ bóc tách chữ, bảng biểu, hình vẽ và ${autoSolve ? 'tự động giải chi tiết' : 'trích xuất câu hỏi'}].`);
     } else if (docs.length > 0) {
       const doc = docs[0];
-      if (doc.size > 4.2 * 1024 * 1024) {
-        setError(`File tài liệu (${(doc.size / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4.2 MB của đám mây Vercel. Vui lòng chọn file dưới 4.2 MB.`);
+      if (doc.size > 4 * 1024 * 1024) {
+        setError(`File tài liệu (${(doc.size / (1024 * 1024)).toFixed(1)} MB) vượt quá giới hạn 4 MB của hạ tầng đám mây Vercel Serverless. Vui lòng dùng file PDF dưới 4 MB hoặc tải ảnh các trang.`);
         event.target.value = '';
         return;
       }
@@ -1559,20 +1581,22 @@ async function optimizeImageForUpload(file: File): Promise<File> {
                 <button
                   type="submit"
                   id="btn-admin-submit-ingestion"
-                  disabled={isSubmitting || (!rawContent.trim() && !selectedFile && selectedImages.length === 0) || !sourceName.trim()}
+                  disabled={isSubmitting || isOptimizingImages || (!rawContent.trim() && !selectedFile && selectedImages.length === 0) || !sourceName.trim()}
                   className={`flex items-center gap-2.5 rounded-xl px-5 py-3 text-sm font-bold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 ${
                     selectedImages.length > 0
                       ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 shadow-purple-950/60'
                       : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-950/50'
                   }`}
                 >
-                  <Sparkles className={`w-4 h-4 ${isSubmitting ? 'animate-spin text-yellow-300' : 'text-cyan-300'}`} />
+                  <Sparkles className={`w-4 h-4 ${isSubmitting || isOptimizingImages ? 'animate-spin text-yellow-300' : 'text-cyan-300'}`} />
                   <span>
-                    {isSubmitting
-                      ? (selectedImages.length > 0 ? 'AI đang bóc tách hình ảnh & tự động giải đề...' : 'Hệ thống đang bóc tách & nạp đề thi...')
-                      : (selectedImages.length > 0
-                          ? (autoSolve ? `🧠 Bóc tách ${selectedImages.length} ảnh & Tự động giải đề qua AI` : `📸 Bóc tách đề từ ${selectedImages.length} ảnh`)
-                          : 'Bóc tách & Nạp đề thi ngay')}
+                    {isOptimizingImages
+                      ? '🔄 Đang tự động nén & tối ưu ảnh cho Vercel...'
+                      : isSubmitting
+                        ? (selectedImages.length > 0 ? 'AI đang bóc tách hình ảnh & tự động giải đề...' : 'Hệ thống đang bóc tách & nạp đề thi...')
+                        : (selectedImages.length > 0
+                            ? (autoSolve ? `🧠 Bóc tách ${selectedImages.length} ảnh & Tự động giải đề qua AI` : `📸 Bóc tách đề từ ${selectedImages.length} ảnh`)
+                            : 'Bóc tách & Nạp đề thi ngay')}
                   </span>
                 </button>
               )}
