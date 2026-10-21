@@ -16,9 +16,10 @@ import {
   verifyAllQuestions,
   getIngestedPapers,
   getIngestedPaperDetails,
-  IngestedPaper
+  IngestedPaper,
+  scanExamSourcesBySubject
 } from '@/lib/api';
-import { IngestionStatusResponse, SubjectCode } from '@/types';
+import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult } from '@/types';
 import {
   Clock,
   CheckCircle2,
@@ -34,7 +35,9 @@ import {
   Search,
   Layers,
   BookOpen,
-  AlertTriangle
+  AlertTriangle,
+  Zap,
+  Compass
 } from 'lucide-react';
 
 const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
@@ -89,6 +92,111 @@ export default function AdminPage() {
   }>({ content: '', attachedTable: '', topic: '', difficulty: '', explanation: '' });
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
+
+  // Source auto-scan & detection state
+  const [isScanningSource, setIsScanningSource] = useState(false);
+  const [scannedSourceResult, setScannedSourceResult] = useState<SubjectSourceScanResult | null>(null);
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
+  const [sourceNotice, setSourceNotice] = useState<string | null>(null);
+
+  const handleScanSubjectSources = async (autoSelect = false) => {
+    setIsScanningSource(true);
+    setSourceNotice(null);
+    try {
+      const res = await scanExamSourcesBySubject(subjectCode);
+      setScannedSourceResult(res);
+      if (autoSelect || !isSourceModalOpen) {
+        if (res.recommendedSource) {
+          setSourceName(res.recommendedSource);
+          const yearMatch = res.recommendedSource.match(/(202\d)/);
+          if (yearMatch && !examYear) setExamYear(yearMatch[1]);
+          const top = res.sources.find(s => s.name === res.recommendedSource);
+          setSourceNotice(`Đã tự động chọn nguồn tối ưu: "${res.recommendedSource}" (${top?.totalQuestions ?? 0} câu)`);
+        } else if (res.sources.length > 0) {
+          setSourceName(res.sources[0].name);
+          const yearMatch = res.sources[0].name.match(/(202\d)/);
+          if (yearMatch && !examYear) setExamYear(yearMatch[1]);
+          setSourceNotice(`Đã chọn nguồn: "${res.sources[0].name}" (${res.sources[0].totalQuestions} câu)`);
+        } else {
+          setSourceNotice(`Môn ${supportedSubjects.find(s => s.code === subjectCode)?.label} chưa có nguồn đề thi trên hệ thống.`);
+          setIsSourceModalOpen(true);
+        }
+      }
+    } catch (cause) {
+      setSourceNotice(cause instanceof Error ? cause.message : 'Không thể quét nguồn đề theo môn');
+    } finally {
+      setIsScanningSource(false);
+    }
+  };
+
+  const handleAutoDetectFromContent = () => {
+    const textToScan = `${selectedFile?.name || ''}\n${rawContent || ''}`;
+    if (!textToScan.trim()) {
+      setSourceNotice('Vui lòng chọn file đề thi hoặc dán nội dung văn bản đề trước khi quét.');
+      return;
+    }
+
+    let detectedSource = '';
+    let detectedYear = '';
+    let detectedSubject: SubjectCode | null = null;
+
+    // Detect Year
+    const yearMatch = textToScan.match(/(?:năm\s+học|năm|khóa)\s*(?:20\d\d[-–])?\s*(202\d)/i) || textToScan.match(/\b(202\d)\b/);
+    if (yearMatch) {
+      detectedYear = yearMatch[1];
+    }
+
+    // Detect Department of Education (Sở GD&ĐT)
+    const soMatch = textToScan.match(/SỞ\s+(?:GIÁO\s+DỤC\s+(?:VÀ|&)\s+ĐÀO\s+TẠO|GD\s*&?\s*ĐT)\s+([A-ZÀ-Ỹ\s]+?)(?:\s+TRƯỜNG|\s+ĐỀ|\s+KỲ|\s*\n|$)/i);
+    if (soMatch) {
+      const prov = soMatch[1].trim().replace(/[-–_]/g, ' ');
+      detectedSource = `Sở GD&ĐT ${prov.charAt(0).toUpperCase() + prov.slice(1).toLowerCase()}`;
+    }
+
+    // Detect High School (Trường THPT)
+    const thptMatch = textToScan.match(/TRƯỜNG\s+THPT\s+(?:CHUYÊN\s+)?([A-ZÀ-Ỹ\s]+?)(?:\s+ĐỀ|\s+KỲ|\s*\n|$)/i);
+    if (thptMatch && !detectedSource) {
+      const school = thptMatch[1].trim();
+      detectedSource = `THPT ${school.charAt(0).toUpperCase() + school.slice(1).toLowerCase()}`;
+    }
+
+    // Detect Ministry of Education (Bộ GD&ĐT)
+    if (/BỘ\s+GIÁO\s+DỤC\s+(?:VÀ|&)\s+ĐÀO\s+TẠO/i.test(textToScan)) {
+      detectedSource = 'Bộ Giáo Dục & Đào Tạo';
+    }
+
+    // Detect Subject
+    if (/ĐỊA\s+L[ÍÝ]/i.test(textToScan)) detectedSubject = 'GEOGRAPHY';
+    else if (/LỊCH\s+SỬ/i.test(textToScan)) detectedSubject = 'HISTORY';
+    else if (/TOÁN/i.test(textToScan)) detectedSubject = 'MATHEMATICS';
+    else if (/VẬT\s+L[ÍÝ]/i.test(textToScan)) detectedSubject = 'PHYSICS';
+    else if (/HÓA\s+HỌC/i.test(textToScan)) detectedSubject = 'CHEMISTRY';
+    else if (/SINH\s+HỌC/i.test(textToScan)) detectedSubject = 'BIOLOGY';
+    else if (/TIẾNG\s+ANH/i.test(textToScan)) detectedSubject = 'ENGLISH';
+    else if (/KINH\s+TẾ|PHÁP\s+LUẬT/i.test(textToScan)) detectedSubject = 'LAW_ECONOMICS';
+
+    const msg: string[] = [];
+    if (detectedSource) {
+      const fullSourceName = detectedYear ? `${detectedSource} ${detectedYear}` : detectedSource;
+      setSourceName(fullSourceName);
+      msg.push(`Nguồn: "${fullSourceName}"`);
+    }
+    if (detectedYear) {
+      setExamYear(detectedYear);
+      msg.push(`Năm: ${detectedYear}`);
+    }
+    if (detectedSubject && detectedSubject !== subjectCode) {
+      setSubjectCode(detectedSubject);
+      const subLabel = supportedSubjects.find(s => s.code === detectedSubject)?.label;
+      msg.push(`Môn: ${subLabel}`);
+    }
+
+    if (msg.length > 0) {
+      setSourceNotice(`🔍 Đã tự động nhận diện từ văn bản: ${msg.join(' • ')}`);
+    } else {
+      setSourceNotice('Không tìm thấy thông tin Sở/Trường trong văn bản. Bạn có thể nhấn "⚡ Quét nguồn theo môn" để chọn từ danh mục có sẵn.');
+    }
+  };
 
   const refreshStats = useCallback(async () => {
     try {
@@ -365,22 +473,300 @@ export default function AdminPage() {
                 <FileText className="w-5 h-5 text-indigo-400" />
                 <h2 className="text-lg font-bold">Nạp đề thi mới vào hàng đợi bóc tách</h2>
               </div>
+              {/* AUTO-SCAN & SELECT BANNER */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-4 rounded-2xl bg-gradient-to-r from-indigo-950/70 via-purple-950/50 to-cyan-950/60 border border-indigo-500/40 shadow-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-600/30 border border-indigo-500/40 text-yellow-300 shrink-0">
+                      <Zap className="w-5 h-5 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          Tự động quét & chọn nguồn đề
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold">
+                          Tính năng mới
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300">
+                        Quét CSDL ngân hàng câu hỏi theo môn học hoặc quét tiêu đề văn bản đề thi để tự điền nguồn.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
+                    {/* BUTTON 1: QUÉT NGUỒN THEO MÔN */}
+                    <button
+                      type="button"
+                      id="btn-admin-scan-source-by-subject"
+                      onClick={() => void handleScanSubjectSources(true)}
+                      disabled={isScanningSource}
+                      className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-black text-xs shadow-lg shadow-indigo-950/50 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+                      title="Quét ngân hàng đề thi theo môn học và chọn nguồn tối ưu"
+                    >
+                      <Zap className={`w-3.5 h-3.5 text-yellow-300 ${isScanningSource ? 'animate-spin' : ''}`} />
+                      <span>{isScanningSource ? 'Đang quét...' : '⚡ Quét nguồn theo môn'}</span>
+                    </button>
+
+                    {/* BUTTON 2: BROWSE SCANNED SOURCES */}
+                    <button
+                      type="button"
+                      id="btn-admin-browse-sources"
+                      onClick={async () => {
+                        if (!scannedSourceResult) {
+                          await handleScanSubjectSources(false);
+                        }
+                        setIsSourceModalOpen(true);
+                      }}
+                      disabled={isScanningSource}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-white/10 text-slate-200 hover:text-white text-xs font-semibold transition-all"
+                      title="Xem toàn bộ danh sách nguồn đề theo môn"
+                    >
+                      <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>DS Nguồn ({scannedSourceResult?.sources.length ?? '...'})</span>
+                    </button>
+
+                    {/* BUTTON 3: TỰ ĐỘNG NHẬN DIỆN TỪ VĂN BẢN / FILE */}
+                    <button
+                      type="button"
+                      id="btn-admin-detect-source"
+                      onClick={handleAutoDetectFromContent}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-white/10 text-slate-200 hover:text-white text-xs font-semibold transition-all"
+                      title="Quét tiêu đề văn bản hoặc tên file để tự trích xuất Sở GD, Trường, Năm"
+                    >
+                      <Search className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>🔍 Quét từ văn bản đề</span>
+                    </button>
+                  </div>
+                </div>
+
+                {sourceNotice && (
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-cyan-950/50 border border-cyan-500/30 text-xs text-cyan-200 shadow-md">
+                    <span className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span>{sourceNotice}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSourceNotice(null)}
+                      className="text-cyan-400 hover:text-white ml-2 p-1 rounded hover:bg-cyan-900/40"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="text-sm text-slate-300">
                   Môn học
-                  <select value={subjectCode} onChange={event => setSubjectCode(event.target.value as SubjectCode)} className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5">
+                  <select
+                    value={subjectCode}
+                    onChange={event => {
+                      setSubjectCode(event.target.value as SubjectCode);
+                      setScannedSourceResult(null);
+                    }}
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500"
+                  >
                     {supportedSubjects.map(subject => <option key={subject.code} value={subject.code}>{subject.label}</option>)}
                   </select>
                 </label>
-                <label className="text-sm text-slate-300">
-                  Nguồn đề
-                  <input required maxLength={200} value={sourceName} onChange={event => setSourceName(event.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5" />
-                </label>
+                <div className="space-y-1">
+                  <label className="flex items-center justify-between text-sm text-slate-300">
+                    <span>Nguồn đề</span>
+                    <span className="text-[11px] text-cyan-400 font-normal">Sở GD&ĐT / THPT Chuyên</span>
+                  </label>
+                  <input
+                    required
+                    maxLength={200}
+                    placeholder="VD: Sở GD&ĐT Hà Nội 2025"
+                    value={sourceName}
+                    onChange={event => setSourceName(event.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
                 <label className="text-sm text-slate-300">
                   Năm (không bắt buộc)
-                  <input type="number" min="2000" max="2100" value={examYear} onChange={event => setExamYear(event.target.value)} className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5" />
+                  <input
+                    type="number"
+                    min="2000"
+                    max="2100"
+                    placeholder="2025"
+                    value={examYear}
+                    onChange={event => setExamYear(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
                 </label>
               </div>
+
+              {/* QUICK SUGGESTION PILLS */}
+              <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-400 pt-1">
+                <span className="text-[11px] text-slate-400 font-semibold mr-1">Gợi ý nhanh:</span>
+                {[
+                  'Bộ GD&ĐT 2025',
+                  'Sở GD&ĐT Hà Nội 2025',
+                  'Sở GD&ĐT TP.HCM 2025',
+                  'Sở GD&ĐT Bắc Ninh 2025',
+                  'Sở GD&ĐT Nghệ An 2025',
+                  'THPT Chuyên Hà Nội - Amsterdam 2025',
+                  'THPT Chuyên Lam Sơn 2025'
+                ].map(quick => (
+                  <button
+                    key={quick}
+                    type="button"
+                    onClick={() => {
+                      setSourceName(quick);
+                      const m = quick.match(/(202\d)/);
+                      if (m) setExamYear(m[1]);
+                      setSourceNotice(`Đã chọn gợi ý nhanh: "${quick}"`);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg border transition-all ${
+                      sourceName === quick
+                        ? 'bg-indigo-600/30 border-cyan-400 text-cyan-300 font-bold shadow-sm'
+                        : 'bg-slate-900/60 border-white/5 hover:border-white/20 hover:text-white'
+                    }`}
+                  >
+                    + {quick}
+                  </button>
+                ))}
+              </div>
+
+              {/* MODAL DANH SÁCH NGUỒN THEO MÔN */}
+              {isSourceModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+                  <div className="bg-slate-900 border border-white/10 rounded-3xl max-w-2xl w-full p-6 space-y-4 max-h-[85vh] flex flex-col shadow-2xl">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-indigo-600/30 flex items-center justify-center text-cyan-400 border border-indigo-500/30">
+                          <Compass className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-white">
+                            Danh Sách Nguồn Đề Môn {supportedSubjects.find(s => s.code === subjectCode)?.label}
+                          </h3>
+                          <p className="text-xs text-slate-400">
+                            Nhấn vào 1 nguồn để tự động điền tên đề và năm thi
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSourceModalOpen(false)}
+                        className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="overflow-y-auto space-y-2 pr-1 flex-1">
+                      {isScanningSource ? (
+                        <div className="py-8 text-center text-slate-400 text-sm">
+                          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-400" />
+                          Đang quét ngân hàng câu hỏi...
+                        </div>
+                      ) : scannedSourceResult && scannedSourceResult.sources.length > 0 ? (
+                        scannedSourceResult.sources.map(src => {
+                          const isSelected = sourceName === src.name;
+                          return (
+                            <div
+                              key={src.name}
+                              className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                                isSelected
+                                  ? 'bg-indigo-600/20 border-cyan-400 shadow-md'
+                                  : 'bg-slate-950/60 border-white/10 hover:border-white/20'
+                              }`}
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-sm text-white">{src.name}</span>
+                                  {src.isFullMatrix && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+                                      Đủ ma trận
+                                    </span>
+                                  )}
+                                  {scannedSourceResult.recommendedSource === src.name && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+                                      ⭐ Tối ưu
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 text-xs text-slate-400">
+                                  <span>{src.totalQuestions} câu hỏi</span>
+                                  <span>•</span>
+                                  <span>P.I: {src.part1Count}</span>
+                                  <span>•</span>
+                                  <span>P.II: {src.part2Count}</span>
+                                  <span>•</span>
+                                  <span>P.III: {src.part3Count}</span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSourceName(src.name);
+                                  const y = src.name.match(/(202\d)/);
+                                  if (y) setExamYear(y[1]);
+                                  setSourceNotice(`Đã chọn: "${src.name}" (${src.totalQuestions} câu)`);
+                                  setIsSourceModalOpen(false);
+                                }}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                                  isSelected
+                                    ? 'bg-cyan-500 text-slate-950 font-black'
+                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                                }`}
+                              >
+                                {isSelected ? 'Đang chọn' : 'Chọn nguồn này'}
+                              </button>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="py-8 text-center text-slate-400 text-sm space-y-3">
+                          <p>Chưa có câu hỏi nào trong ngân hàng gắn với môn này.</p>
+                          <p className="text-xs text-slate-500">
+                            Bạn có thể chọn nhanh các nguồn chuẩn quốc gia bên dưới:
+                          </p>
+                          <div className="flex flex-wrap gap-2 justify-center pt-2">
+                            {[
+                              'Bộ Giáo Dục & Đào Tạo 2025',
+                              'Sở GD&ĐT Hà Nội 2025',
+                              'Sở GD&ĐT TP.HCM 2025',
+                              'Sở GD&ĐT Nghệ An 2025',
+                              'THPT Chuyên Hà Nội - Amsterdam 2025'
+                            ].map(preset => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => {
+                                  setSourceName(preset);
+                                  const y = preset.match(/(202\d)/);
+                                  if (y) setExamYear(y[1]);
+                                  setSourceNotice(`Đã chọn: "${preset}"`);
+                                  setIsSourceModalOpen(false);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-white/10"
+                              >
+                                + {preset}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end pt-2 border-t border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => setIsSourceModalOpen(false)}
+                        className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300"
+                      >
+                        Đóng
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <label className="block text-sm text-slate-300">
                 Chọn file đề thi (.txt hoặc .pdf, tối đa 10 MB)

@@ -239,6 +239,39 @@ function ExamSetupContent() {
               </div>
             </section>
 
+            {/* PROMINENT AUTO-SCAN BANNER WITH BUTTON */}
+            <div className="relative overflow-hidden rounded-3xl p-5 sm:p-6 bg-gradient-to-r from-indigo-950/80 via-purple-950/60 to-cyan-950/80 border border-indigo-500/40 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center shrink-0 shadow-inner">
+                  <Zap className="w-6 h-6 text-yellow-300 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-white">
+                      Tự Động Quét Nguồn Đề: <span className="text-cyan-300">{activeSubjectData?.name || selectedSubject}</span>
+                    </h3>
+                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      Auto-Scan
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                    Hệ thống sẽ quét nhanh tất cả các nguồn đề (Sở GD&ĐT, THPT Chuyên) của môn này, kiểm tra ma trận 3 phần thi và tự động chọn nguồn có đề thi chất lượng nhất.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="btn-auto-scan-exam-page"
+                onClick={() => void performScan(selectedSubject, true)}
+                disabled={isScanningSources}
+                className="w-full md:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-black text-sm shadow-xl shadow-indigo-950/60 transition-all hover:scale-[1.03] active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shrink-0 border border-cyan-400/30"
+              >
+                <Zap className={`w-4 h-4 text-yellow-300 ${isScanningSources ? 'animate-bounce' : ''}`} />
+                <span>{isScanningSources ? 'Đang quét ngân hàng đề...' : '⚡ Nhấn để Quét & Chọn Nguồn Tự Động'}</span>
+              </button>
+            </div>
+
             {/* STEP 2: CHỌN NGUỒN ĐỀ THI */}
             <section className="glass-panel rounded-3xl p-6 sm:p-8 border border-white/10 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
