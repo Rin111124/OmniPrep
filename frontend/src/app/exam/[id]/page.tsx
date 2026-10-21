@@ -140,7 +140,7 @@ function VirtualExamRoom({ examIdParam }: { examIdParam: string }) {
 
     void initExam();
     return () => { active = false; };
-  }, [examIdParam, subjectCode, modeParam, topicParam, authLoading, user.id, user.isAuthenticated, attemptIdParam, searchQuery, router]);
+  }, [examIdParam, subjectCode, modeParam, topicParam, sourceParam, authLoading, user.id, user.isAuthenticated, attemptIdParam, searchQuery, router]);
 
   useEffect(() => {
     if (!hasLoadedAttempt || !attemptId || isLoading || isSubmitting) return;

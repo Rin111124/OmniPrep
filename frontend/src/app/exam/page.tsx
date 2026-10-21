@@ -53,8 +53,8 @@ function ExamSetupContent() {
       setSubjects(subList);
       setSources(srcList);
       const ready = subList.filter(s => s.isExamReady);
-      if (ready.length && !ready.some(s => s.code === selectedSubject)) {
-        setSelectedSubject(ready[0].code);
+      if (ready.length) {
+        setSelectedSubject(current => ready.some(s => s.code === current) ? current : ready[0].code);
       }
       setIsLoading(false);
     });
