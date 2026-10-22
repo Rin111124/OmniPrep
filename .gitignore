@@ -32,6 +32,8 @@ docs/
 !docs/
 docs/*
 !docs/ingestion-module-roadmap.md
+!docs/image-exam-extraction.md
+!docs/browser-ocr-implementation.md
 
 # Build artifacts & packages
 publish/

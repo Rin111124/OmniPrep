@@ -23,6 +23,7 @@ import {
   ingestFromRemoteUrl,
   autoFetchOnlineExam
 } from '@/lib/api';
+import { ExamOcrPanel } from '@/components/admin/ExamOcrPanel';
 import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult, OnlineCatalogItem } from '@/types';
 import {
   Clock,
@@ -75,7 +76,7 @@ export default function AdminPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-  const [autoSolve, setAutoSolve] = useState<boolean>(true);
+  const [autoSolve, setAutoSolve] = useState<boolean>(false);
   const [isOptimizingImages, setIsOptimizingImages] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -118,7 +119,7 @@ export default function AdminPage() {
   const [sourceNotice, setSourceNotice] = useState<string | null>(null);
 
   // Online Catalog & Remote URL Ingestion State
-  const [ingestionMode, setIngestionMode] = useState<'upload' | 'online'>('upload');
+  const [ingestionMode, setIngestionMode] = useState<'ocr' | 'upload' | 'online'>('ocr');
   const [onlineCatalog, setOnlineCatalog] = useState<OnlineCatalogItem[]>([]);
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
   const [remoteUrlInput, setRemoteUrlInput] = useState('');
@@ -560,6 +561,9 @@ export default function AdminPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (ingestionMode === 'ocr') {
+      return;
+    }
     if (ingestionMode === 'online') {
       if (remoteUrlInput.trim()) {
         await handleIngestFromRemoteUrl();
@@ -910,9 +914,23 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                   <h2 className="text-lg font-bold">Nạp & bóc tách đề thi vào hệ thống</h2>
                 </div>
 
-                <div className="flex items-center rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0">
+                <div className="flex items-center rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0 flex-wrap gap-1">
                   <button
                     type="button"
+                    id="btn-admin-mode-ocr"
+                    onClick={() => setIngestionMode('ocr')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      ingestionMode === 'ocr'
+                        ? 'bg-gradient-to-r from-cyan-600 to-indigo-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                    <span>⚡ OCR Trình duyệt (Khuyên dùng)</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-admin-mode-upload"
                     onClick={() => setIngestionMode('upload')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                       ingestionMode === 'upload'
@@ -937,7 +955,7 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                     }`}
                   >
                     <Globe className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
-                    <span>🌐 Kho đề trực tuyến (Không cần file)</span>
+                    <span>🌐 Kho đề trực tuyến</span>
                   </button>
                 </div>
               </div>
@@ -956,6 +974,27 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
+              )}
+
+              {/* CHẾ ĐỘ 0: OCR TRỰC TIẾP TRÊN TRÌNH DUYỆT (TESSERACT.JS + PDF.JS) */}
+              {ingestionMode === 'ocr' && (
+                <ExamOcrPanel
+                  subjectCode={subjectCode}
+                  sourceName={sourceName}
+                  examYear={examYear}
+                  onSourceNameChange={setSourceName}
+                  onExamYearChange={setExamYear}
+                  onSuccess={(resp) => {
+                    setResult(resp);
+                    setSourceNotice(`✅ Bóc tách hoàn tất: ${resp.totalExtracted || 0} câu hỏi từ nguồn "${sourceName}". Đã sẵn sàng duyệt!`);
+                    void refreshPending();
+                    void loadIngestedPapers();
+                  }}
+                  onError={(err) => {
+                    setError(err);
+                    setSourceNotice(null);
+                  }}
+                />
               )}
 
               {/* MODE 1: ONLINE INGESTION (KHÔNG CẦN NẠP FILE) */}

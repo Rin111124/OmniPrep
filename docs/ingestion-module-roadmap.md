@@ -18,9 +18,9 @@ Tài liệu này mô tả hiện trạng, mục tiêu và các bước triển k
 | Thành phần | Hiện trạng |
 |---|---|
 | Nhập thủ công | Trang admin nhận nội dung dán vào hoặc file `.txt`; API xử lý trực tiếp trong request. |
-| PDF, DOCX, ảnh | Chưa hỗ trợ. UI chỉ nhận `.txt`; OCR chưa được triển khai. |
+| PDF, DOCX, ảnh | API hỗ trợ PDF/TXT và ảnh PNG/JPG/JPEG/WebP/BMP. PDF có text được đọc bằng PdfPig; ảnh và PDF scan được gửi tới Gemini Vision. DOCX chưa hỗ trợ. Có giới hạn kích thước ở UI/proxy/API nhưng chúng chưa đồng nhất. |
 | Tìm nguồn | `ScraperService` chỉ đọc `.txt`/`.md` trong `scratch/incoming_papers`; chưa tìm kiếm web hoặc tải tài liệu từ xa. |
-| Bóc tách | `GeminiService` dùng structured output và prompt riêng cho GEO, GDKTPL. Chia phần dựa trên tiêu đề phần; không có chia đoạn tổng quát theo kích thước hoặc xác nhận đủ số câu. |
+| Bóc tách | `GeminiService` dùng structured output và prompt riêng cho GEO, GDKTPL. Nhánh ảnh gửi toàn bộ ảnh trong một yêu cầu Gemini Vision; PDF có text không tự ghép OCR cho các trang scan xen kẽ. |
 | Kiểm tra đầu ra | Có deserialize JSON, nhưng chưa có bước kiểm tra đầy đủ cấu trúc `AnswerData` theo định dạng câu hỏi trước khi lưu. |
 | Chống trùng | Hash nội dung câu hỏi và tìm gần giống qua embedding/pgvector. Bảng, đáp án và ngữ cảnh chưa được tính vào hash chính xác. |
 | Kiểm duyệt | Câu mới chưa xác minh; API và trang admin có duyệt, từ chối và hiệu đính. Biến thể AI cũng được đưa vào hàng chờ duyệt. |
@@ -182,15 +182,15 @@ Tái sử dụng worker hiện có cho xử lý nền, nhưng đưa thao tác nh
 4. Tạo hàng chờ ứng viên để admin xem nguồn/tài liệu; bật tự enqueue chỉ cho nguồn `Active`.
 5. Đặt giới hạn quota theo nguồn/ngày và nút pause toàn bộ discovery.
 
-### P2 — PDF và OCR
+### P2 — Hoàn thiện PDF và OCR
 
-1. Hỗ trợ PDF có text, giữ số trang và kiểm tra độ phủ.
-2. Bổ sung OCR cho file scan sau khi đánh giá chất lượng trên bộ đề thực tế.
-3. Thêm cảnh báo OCR confidence thấp và yêu cầu người duyệt đối chiếu ảnh gốc.
+1. PDF có text hiện được trích bằng PdfPig; bổ sung theo dõi độ phủ theo trang.
+2. PDF scan toàn trang hiện có thể chuyển qua Gemini Vision; bổ sung OCR theo từng trang và hỗ trợ PDF trộn text/scan.
+3. Lưu ảnh/PDF gốc, gắn nguồn trang cho từng câu, và cảnh báo chất lượng nhận dạng thấp để reviewer đối chiếu.
 
 ### P3 — Mở rộng an toàn
 
-Mở thêm nguồn/môn sau khi đánh giá chất lượng, quyền sử dụng, quota và vận hành của từng nguồn. DOCX, hình trong đề, biểu đồ và sơ đồ cần có adapter/đánh giá riêng; không giả định OCR văn bản xử lý đúng các dạng này.
+Mở thêm nguồn/môn sau khi đánh giá chất lượng, quyền sử dụng, quota và vận hành của từng nguồn. DOCX, hình/biểu đồ/sơ đồ nhúng trong đề cần có adapter hoặc bộ đánh giá riêng; không giả định OCR văn bản xử lý đúng các dạng này.
 
 ## 11. Chỉ số và tiêu chí nghiệm thu
 

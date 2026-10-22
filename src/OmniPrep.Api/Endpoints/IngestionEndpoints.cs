@@ -50,7 +50,7 @@ public static class IngestionEndpoints
             short? examYear = short.TryParse(examYearStr, out var parsedYear) ? parsedYear : null;
 
             var autoSolveStr = form["autoSolve"].ToString();
-            bool autoSolve = true;
+            bool autoSolve = false; // Mặc định tắt auto-solve theo khuyến nghị P0
             if (!string.IsNullOrWhiteSpace(autoSolveStr) && bool.TryParse(autoSolveStr, out var parsedAutoSolve))
             {
                 autoSolve = parsedAutoSolve;
@@ -72,18 +72,23 @@ public static class IngestionEndpoints
                 var imageBytesList = new List<(byte[] Data, string MimeType)>();
                 foreach (var imgFile in imageFiles)
                 {
-                    var ext = Path.GetExtension(imgFile.FileName).ToLowerInvariant();
-                    string mime = ext switch
-                    {
-                        ".png" => "image/png",
-                        ".jpg" or ".jpeg" => "image/jpeg",
-                        ".webp" => "image/webp",
-                        ".bmp" => "image/bmp",
-                        _ => "image/jpeg"
-                    };
+                    if (imgFile.Length == 0)
+                        return Results.BadRequest($"File ảnh {imgFile.FileName} rỗng.");
+
+                    if (imgFile.Length > 10 * 1024 * 1024)
+                        return Results.BadRequest($"File {imgFile.FileName} vượt quá giới hạn 10 MB cho mỗi ảnh.");
+
                     using var ms = new MemoryStream();
                     await imgFile.CopyToAsync(ms, ct);
-                    imageBytesList.Add((ms.ToArray(), mime));
+                    var bytes = ms.ToArray();
+
+                    var ext = Path.GetExtension(imgFile.FileName).ToLowerInvariant();
+                    if (!TryDetectImageMime(bytes, ext, out var mime))
+                    {
+                        return Results.BadRequest($"Định dạng file {imgFile.FileName} không hợp lệ hoặc bị hỏng.");
+                    }
+
+                    imageBytesList.Add((bytes, mime));
                 }
 
                 string imgTitle = imageFiles.Count == 1 
@@ -437,12 +442,18 @@ public static class IngestionEndpoints
             var result = await ingestionService.IngestExamPaperAsync(
                 paper.Id, contentToProcess, code, source.Name, examYear, ct);
 
-            paper.Status = result.TotalFailed == result.TotalExtracted && result.TotalExtracted > 0
-                ? IngestionStatus.Failed
-                : IngestionStatus.Completed;
+            bool isFailed = DetermineIsFailed(result.TotalExtracted, result.TotalFailed, result.TotalNew, result.TotalMerged);
+
+            paper.Status = isFailed ? IngestionStatus.Failed : IngestionStatus.Completed;
             await paperRepo.SaveChangesAsync(ct);
 
-            return Results.Ok(new
+            string message = isFailed
+                ? (result.TotalExtracted == 0
+                    ? "Không trích xuất được câu hỏi nào từ nội dung đề thi. Vui lòng kiểm tra lại chất lượng nội dung."
+                    : $"Bóc tách không thành công: tất cả {result.TotalFailed} câu hỏi đều không vượt qua bước kiểm định chất lượng.")
+                : $"Bóc tách hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi.";
+
+            var responseData = new
             {
                 PaperId = paper.Id,
                 Status = paper.Status.ToString(),
@@ -454,8 +465,12 @@ public static class IngestionEndpoints
                 Part2Count = result.Part2Count,
                 Part3Count = result.Part3Count,
                 Errors = result.Errors,
-                Message = $"Bóc tách hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi."
-            });
+                Message = message
+            };
+
+            return isFailed && result.TotalExtracted == 0
+                ? Results.BadRequest(responseData)
+                : Results.Ok(responseData);
         }
         catch (Exception ex)
         {
@@ -465,7 +480,6 @@ public static class IngestionEndpoints
             {
                 title = "Bóc tách đề thi thất bại",
                 message = $"Lỗi trong quá trình bóc tách đề thi: {ex.Message}",
-                detail = ex.ToString(),
                 status = 500
             }, statusCode: StatusCodes.Status500InternalServerError);
         }
@@ -538,12 +552,18 @@ public static class IngestionEndpoints
             var result = await ingestionService.IngestExamPaperFromImagesAsync(
                 paper.Id, images, code, source.Name, examYear, autoSolve, ct);
 
-            paper.Status = result.TotalFailed == result.TotalExtracted && result.TotalExtracted > 0
-                ? IngestionStatus.Failed
-                : IngestionStatus.Completed;
+            bool isFailed = DetermineIsFailed(result.TotalExtracted, result.TotalFailed, result.TotalNew, result.TotalMerged);
+
+            paper.Status = isFailed ? IngestionStatus.Failed : IngestionStatus.Completed;
             await paperRepo.SaveChangesAsync(ct);
 
-            return Results.Ok(new
+            string message = isFailed
+                ? (result.TotalExtracted == 0
+                    ? "Không trích xuất được câu hỏi nào từ ảnh đề thi. Vui lòng kiểm tra lại độ rõ nét hoặc thử OCR trên trình duyệt."
+                    : $"Bóc tách ảnh không thành công: tất cả {result.TotalFailed} câu hỏi đều không vượt qua bước kiểm định chất lượng.")
+                : $"Bóc tách & giải đề qua ảnh hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi.";
+
+            var responseData = new
             {
                 PaperId = paper.Id,
                 Status = paper.Status.ToString(),
@@ -555,8 +575,12 @@ public static class IngestionEndpoints
                 Part2Count = result.Part2Count,
                 Part3Count = result.Part3Count,
                 Errors = result.Errors,
-                Message = $"Bóc tách & giải đề qua ảnh hoàn tất: {result.TotalNew} câu hỏi mới được nạp, {result.TotalMerged} câu trùng lặp được gộp, {result.TotalFailed} câu lỗi."
-            });
+                Message = message
+            };
+
+            return isFailed && result.TotalExtracted == 0
+                ? Results.BadRequest(responseData)
+                : Results.Ok(responseData);
         }
         catch (Exception ex)
         {
@@ -566,10 +590,66 @@ public static class IngestionEndpoints
             {
                 title = "Bóc tách & giải đề qua hình ảnh thất bại",
                 message = $"Lỗi trong quá trình xử lý hình ảnh qua AI: {ex.Message}",
-                detail = ex.ToString(),
                 status = 500
             }, statusCode: StatusCodes.Status500InternalServerError);
         }
+    }
+
+    internal static bool DetermineIsFailed(int totalExtracted, int totalFailed, int totalNew, int totalMerged)
+    {
+        return totalExtracted == 0 ||
+               (totalFailed == totalExtracted && totalExtracted > 0) ||
+               (totalNew == 0 && totalMerged == 0);
+    }
+
+    internal static bool TryDetectImageMime(byte[] bytes, string ext, out string mime)
+    {
+        mime = "application/octet-stream";
+        if (bytes == null || bytes.Length < 4) return false;
+
+        // JPEG: FF D8 FF
+        if (bytes.Length > 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+        {
+            mime = "image/jpeg";
+            return true;
+        }
+
+        // PNG: 89 50 4E 47
+        if (bytes.Length > 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+        {
+            mime = "image/png";
+            return true;
+        }
+
+        // WebP: RIFF .... WEBP
+        if (bytes.Length > 12 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+            bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50)
+        {
+            mime = "image/webp";
+            return true;
+        }
+
+        // BMP: 42 4D ('BM')
+        if (bytes.Length > 2 && bytes[0] == 0x42 && bytes[1] == 0x4D)
+        {
+            mime = "image/bmp";
+            return true;
+        }
+
+        // PDF: %PDF (25 50 44 46)
+        if (bytes.Length > 4 && bytes[0] == 0x25 && bytes[1] == 0x50 && bytes[2] == 0x44 && bytes[3] == 0x46)
+        {
+            mime = "application/pdf";
+            return true;
+        }
+
+        // Fallback for known extensions
+        if (ext is ".jpg" or ".jpeg") { mime = "image/jpeg"; return true; }
+        if (ext is ".png") { mime = "image/png"; return true; }
+        if (ext is ".webp") { mime = "image/webp"; return true; }
+        if (ext is ".bmp") { mime = "image/bmp"; return true; }
+
+        return false;
     }
 
     public sealed record IngestFromUrlRequest(string SubjectCode, string SourceName, string RemoteUrl, string? Title = null, short? ExamYear = null);
