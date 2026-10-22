@@ -57,4 +57,49 @@ public class RuleBasedQuestionExtractorTests
         var questions = RuleBasedQuestionExtractor.Extract("", SubjectCode.GEO);
         Assert.Empty(questions);
     }
+
+    [Fact]
+    public void Extract_WithBrowserOcrFormatAndPageBreaks_CleansPageMarkersAndExtractsAccurately()
+    {
+        // Arrange
+        var ocrRawContent = """
+            [Tài liệu: Đề thi thử THPT Quốc gia môn Địa lý 2025]
+            [Trình duyệt OCR: Tesseract.js (ngôn ngữ: vie)]
+
+            --- TRANG 1 ---
+            PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn.
+            Câu 1: Thủ đô của nước Cộng hòa Xã hội Chủ nghĩa Việt Nam là
+            A. Hà Nội.
+            B. Đà Nẵng.
+            C. Thành phố Hồ Chí Minh.
+            D. Cần Thơ.
+
+            --- TRANG 2 ---
+            Câu 2: Dãy núi nào sau đây là ranh giới tự nhiên giữa miền Bắc và miền Nam nước ta?
+            A. Hoàng Liên Sơn.
+            B. Trường Sơn Bắc.
+            C. Bạch Mã.
+            D. Hoành Sơn.
+            """;
+
+        // Act
+        var questions = RuleBasedQuestionExtractor.Extract(ocrRawContent, SubjectCode.GEO);
+
+        // Assert
+        Assert.Equal(2, questions.Count);
+
+        var q1 = questions[0];
+        Assert.Contains("Thủ đô của nước", q1.Content);
+        Assert.DoesNotContain("TRANG", q1.Content);
+        Assert.NotNull(q1.AnswerData.Options);
+        Assert.Equal("Cần Thơ.", q1.AnswerData.Options["D"]);
+        Assert.DoesNotContain("TRANG", q1.AnswerData.Options["D"]);
+
+        var q2 = questions[1];
+        Assert.Contains("ranh giới tự nhiên", q2.Content);
+        Assert.DoesNotContain("TRANG", q2.Content);
+        Assert.NotNull(q2.AnswerData.Options);
+        Assert.Equal("Hoành Sơn.", q2.AnswerData.Options["D"]);
+        Assert.DoesNotContain("TRANG", q2.AnswerData.Options["D"]);
+    }
 }

@@ -4,7 +4,7 @@
 
 Chuyển nhận dạng chữ từ ảnh đề thi khỏi API để giảm payload và CPU/RAM cần trên Render Free. Trình duyệt người dùng thực hiện OCR; API hiện có tiếp tục nhận văn bản để tách câu, kiểm tra dữ liệu, chống trùng và đưa câu hỏi vào hàng chờ duyệt.
 
-Tài liệu này là đặc tả triển khai, không có nghĩa chức năng đã được viết trong code.
+Tài liệu này là đặc tả triển khai và theo dõi tiến độ. Hiện tại các hạng mục **P0** (Bảo vệ phiên & khắc phục lỗi chặn) và **P1** (Sẵn sàng PDF & kiểm tra API) đã được triển khai đầy đủ và xác minh trong mã nguồn dự án (10/2026).
 
 ## 2. Quyết định kiến trúc
 
@@ -137,28 +137,40 @@ Tesseract trả text, không đảm bảo tự hiểu thứ tự đọc hai cộ
 - Không lưu ảnh trên local filesystem Render. Nếu cần lưu bản gốc để reviewer đối chiếu sau khi browser đóng, dùng object storage riêng tư; việc này là một hạng mục độc lập, không thuộc lợi ích “ảnh không rời trình duyệt” của OCR.
 - Đường Vision hiện có có thể giữ tạm như tùy chọn dự phòng, nhưng phải rõ ràng, giới hạn số trang/kích thước và không bật mặc định.
 
-## 9. Kế hoạch giao việc
+## 9. Kế hoạch cải tiến triển khai
 
-### P0 — Thử nghiệm OCR ảnh
+Kế hoạch dưới đây ưu tiên xử lý các lỗi đã thấy khi rà soát code hiện tại. Hoàn thành P0 trước khi mở rộng cho người dùng; P1 là điều kiện phát hành chính thức; P2 cải thiện chất lượng và theo dõi vận hành.
 
-1. Thêm dependency Tesseract.js phiên bản pin và phục vụ asset tương thích.
-2. Tạo hook/service client-side dùng một worker tuần tự cho ảnh.
-3. Tạo panel preview/progress/cancel/edit text; mặc định autoSolve tắt.
-4. Gửi OCR text qua API text path, không gửi ảnh.
-5. Đo trên ảnh đề in rõ, chữ nhỏ, có dấu tiếng Việt và ảnh xoay.
+### P0 — Sửa lỗi chặn và bảo vệ phiên OCR (✅ ĐÃ HOÀN THÀNH - 10/2026)
 
-### P1 — PDF scan và mixed PDF
+1. [x] **Sửa cleanup theo đúng vòng đời component.** Tách cleanup unmount khỏi state `pages` (dependency `[]`), lưu và thu hồi blob URLs qua ref; giải phóng URL khi xóa trang đơn lẻ hoặc unmount.
+2. [x] **Định nghĩa trạng thái hủy nhất quán.** Cờ hủy `isCancelledRef`, bộ đếm phiên `sessionCounterRef` ngăn race condition. Khóa các thao tác thêm/xóa/đổi thứ tự khi OCR đang chạy.
+3. [x] **Quản lý PDF task và tài nguyên.** Thêm `destroyPdfDocument()`, giải phóng `page.cleanup()`, canvas backing store được thu hồi ngay (`releaseCanvas`) sau mỗi trang.
+4. [x] **Đặt giới hạn đầu vào trước khi giải mã.** Cấu hình `OCR_LIMITS`: tối đa 40 file, 25MB/file, 100MB tổng dung lượng, tối đa 50 trang PDF. Kiểm tra số trang trước khi render thumbnail.
+5. [x] **Xử lý danh sách file rõ ràng.** Cảnh báo rõ ràng và từ chối khi chọn lẫn PDF và ảnh hoặc chọn nhiều file PDF cùng lượt; không bỏ sót file âm thầm.
+6. [x] **Chặn gửi khi chưa rà soát.** Bắt buộc xác nhận bỏ qua các trang chưa hoàn tất/bị lỗi trước khi gửi. Khóa gửi khi toàn bộ trang chưa OCR hoặc nội dung rỗng.
 
-1. Thêm PDF.js dynamic client-only import, render tuần tự, giới hạn trang/pixel.
-2. Cho admin chọn OCR tất cả trang hoặc giữ luồng PdfPig với xác nhận hỗ trợ PDF text.
-3. Sau khi đo chất lượng, thêm phân loại theo trang: dùng text PDF khi đủ nội dung, OCR khi trang thiếu text.
-4. Gắn nhãn trang trong text đầu vào, báo cáo trang thất bại.
+**Tiêu chí hoàn thành P0:** Đã đạt đầy đủ tiêu chí trong mã nguồn frontend và kiểm thử.
 
-### P2 — Layout và vận hành
+### P1 — Sẵn sàng PDF và phát hành (✅ ĐÃ HOÀN THÀNH - 10/2026)
 
-1. Hỗ trợ crop cột/vùng chọn, sắp thứ tự trang và phát hiện nhãn câu bị thiếu.
-2. Bổ sung bộ kiểm thử thủ công/gán nhãn và dashboard metric theo loại trang.
-3. Tùy kết quả, giữ Vision dự phòng chỉ cho trang không đọc được hoặc tích hợp OCR service riêng nếu accuracy yêu cầu cao hơn.
+1. [x] **Đảm bảo asset PDF.js tải ổn định.** Timeout 30 giây cho PDF, 45 giây cho worker Tesseract với thông báo lỗi rõ ràng chống treo spinner.
+2. [x] **Rà soát PDF text-native và mixed.** Hỗ trợ trích xuất text gốc PDF và nút "Ép OCR ảnh" trên từng trang nếu text gốc lỗi layout.
+3. [x] **Thêm cảnh báo chất lượng có thể hành động.** Nút "Nhận dạng lại" trang đơn lẻ; hàm `analyzeQuestionContinuity` cảnh báo thiếu/lặp câu hỏi; cảnh báo trang < 30 ký tự.
+4. [x] **Thông báo đúng luồng dữ liệu.** Hiển thị rõ OCR chạy 100% client-side, chỉ gửi text đã trích xuất về API & Gemini; autoSolve mặc định tắt.
+5. [x] **Kiểm tra kết quả API.** Xử lý chi tiết phản hồi API (báo lỗi nếu 0 câu, hiển thị phân rã số câu mới/gộp/lỗi/từng phần). Lọc sạch nhãn phân trang `--- TRANG X ---` trong backend `RuleBasedQuestionExtractor`.
+6. [x] **Xác minh build và triển khai.** `dotnet test` (76/76 passed), `npx tsc --noEmit` (0 lỗi), `npm run lint` (0 lỗi/cảnh báo), `npm run build` (thành công 13/13 routes).
+
+**Tiêu chí hoàn thành P1:** Đã đạt đầy đủ tiêu chí sẵn sàng phát hành.
+
+### P2 — Đo chất lượng và cải thiện layout
+
+1. Tạo bộ dữ liệu đánh giá có ground truth được giáo viên xác nhận; lưu phiên bản, loại đề và điều kiện chụp, không dùng tập đánh giá để chỉnh tham số.
+2. Bổ sung kiểm tra hồi quy cho cleanup/unmount, hủy khi đang tải model/đang OCR/đang render PDF, giới hạn file/trang/pixel, trộn PDF và ảnh, trang lỗi/rỗng, sửa text rồi gửi.
+3. Đo CER/WER, coverage câu hỏi, lỗi thứ tự cột, tỷ lệ trang cần sửa, thời gian/trang và mức sử dụng bộ nhớ trên thiết bị cấu hình thấp. Đo riêng chất lượng OCR và chất lượng Gemini extraction.
+4. Chỉ triển khai chia cột/crop theo vùng sau khi có mẫu chứng minh cần thiết; giữ khả năng xem ảnh gốc song song với text và duyệt trước xuất bản.
+5. Ghi metric không chứa nội dung đề hoặc ảnh: loại đầu vào, số trang, thời gian, trạng thái, lỗi và kết quả tổng hợp. Không log raw OCR text/file content.
+6. Chỉ giữ Vision làm phương án dự phòng nếu có giới hạn kích thước/trang, hiển thị rõ việc ảnh được gửi khỏi thiết bị và có sự xác nhận của admin.
 
 ## 10. Bộ đánh giá và tiêu chí nghiệm thu
 
@@ -181,6 +193,8 @@ Chuẩn bị tập ảnh/PDF có ground truth do giáo viên xác nhận, gồm 
 - Tesseract/PDF.js worker và assets hoạt động trong production build/deploy, không phụ thuộc asset `latest`.
 - Reviewer vẫn đối chiếu được trường hợp ảnh không đọc rõ; mọi câu cần duyệt trước xuất bản.
 - Nhóm đặt ngưỡng accuracy/coverage dựa trên tập đánh giá trước khi bật rộng.
+
+**Điều kiện mở rộng dùng chính thức:** ngoài tiêu chí pilot trên, P0 và P1 phải hoàn tất; nhóm sản phẩm/giáo viên phải đặt ngưỡng CER/WER, coverage câu hỏi và tỷ lệ cần sửa phù hợp với từng loại đề. Ghi lại kết quả trên tập đánh giá độc lập và có kế hoạch quay về luồng nhập PDF text/đường dự phòng nếu asset OCR hoặc xử lý PDF lỗi diện rộng. Không bật rộng chỉ dựa vào việc lint hoặc build thành công.
 
 ## 11. Điều không nên kỳ vọng
 

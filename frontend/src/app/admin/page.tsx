@@ -986,7 +986,20 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                   onExamYearChange={setExamYear}
                   onSuccess={(resp) => {
                     setResult(resp);
-                    setSourceNotice(`✅ Bóc tách hoàn tất: ${resp.totalExtracted || 0} câu hỏi từ nguồn "${sourceName}". Đã sẵn sàng duyệt!`);
+                    if (resp.totalExtracted === 0 || resp.status === 'Failed') {
+                      setError(resp.message || 'API không trích xuất được câu hỏi nào từ đề thi.');
+                      setSourceNotice(null);
+                    } else {
+                      const parts = [
+                        resp.part1Count ? `Phần I: ${resp.part1Count}` : '',
+                        resp.part2Count ? `Phần II: ${resp.part2Count}` : '',
+                        resp.part3Count ? `Phần III: ${resp.part3Count}` : ''
+                      ].filter(Boolean).join(' • ');
+
+                      const partsStr = parts ? ` (${parts})` : '';
+                      setSourceNotice(`✅ Bóc tách hoàn tất: ${resp.totalNew} câu mới, ${resp.totalMerged} câu gộp trùng, ${resp.totalFailed} câu lỗi${partsStr}. Đã sẵn sàng duyệt!`);
+                      setError('');
+                    }
                     void refreshPending();
                     void loadIngestedPapers();
                   }}

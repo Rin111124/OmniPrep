@@ -19,17 +19,29 @@ export async function initOcrWorker(options: WorkerInitOptions): Promise<Worker>
 
   const langCode = language === 'vie+eng' ? 'vie+eng' : 'vie';
 
-  const worker = await createWorker(langCode, 1, {
-    logger: (message) => {
-      if (onProgress && typeof message.progress === 'number') {
-        const pct = Math.round(message.progress * 100);
-        const status = message.status || 'Đang xử lý';
-        onProgress(pct, status);
-      }
-    }
+  let timer: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('Tải mô hình Tesseract WebAssembly / traineddata quá thời gian chờ (45 giây). Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.'));
+    }, 45000);
   });
 
-  return worker;
+  try {
+    const workerPromise = createWorker(langCode, 1, {
+      logger: (message) => {
+        if (onProgress && typeof message.progress === 'number') {
+          const pct = Math.round(message.progress * 100);
+          const status = message.status || 'Đang xử lý';
+          onProgress(pct, status);
+        }
+      }
+    });
+
+    const worker = await Promise.race([workerPromise, timeoutPromise]);
+    return worker;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**

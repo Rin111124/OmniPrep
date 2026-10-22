@@ -27,10 +27,25 @@ public static class RuleBasedQuestionExtractor
         @"(?:^|\n)\s*([a-d])\)\s*(.+?)(?=(?:\n\s*[a-d]\)|\n\s*(?:Câu|CÂU)\s+\d+|$))",
         RegexOptions.Singleline | RegexOptions.Compiled);
 
+    private static readonly Regex PageMarkerRegex = new(
+        @"(?:\n|^)\s*(?:---\s*(?:TRANG|Trang|PAGE|Page)\s+\d+\s*---|\[(?:TRANG|Trang)\s+\d+\]|\[(?:Tài liệu|Trình duyệt OCR|OCR)[^\]]*\])\s*(?=\n|$)",
+        RegexOptions.Multiline | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Làm sạch các nhãn đánh dấu phân trang và metadata OCR của trình duyệt (ví dụ: --- TRANG 1 ---)
+    /// </summary>
+    public static string CleanOcrAndPageMarkers(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        return PageMarkerRegex.Replace(text, "\n");
+    }
+
     public static IReadOnlyList<ExtractedQuestion> Extract(string text, SubjectCode subjectCode, List<string>? topics = null)
     {
         var questions = new List<ExtractedQuestion>();
         if (string.IsNullOrWhiteSpace(text)) return questions;
+
+        text = CleanOcrAndPageMarkers(text);
 
         var defaultTopic = topics?.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)) ?? GetDefaultTopicForSubject(subjectCode);
 
