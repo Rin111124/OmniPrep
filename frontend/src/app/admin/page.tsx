@@ -21,10 +21,11 @@ import {
   scanExamSourcesBySubject,
   getDiscoveryCandidates,
   ingestFromRemoteUrl,
-  autoFetchOnlineExam
+  autoFetchOnlineExam,
+  getOnlineExamCatalog
 } from '@/lib/api';
 import { ExamOcrPanel } from '@/components/admin/ExamOcrPanel';
-import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult, ExamCandidateItem } from '@/types';
+import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult, ExamCandidateItem, OnlineCatalogItem } from '@/types';
 import {
   Clock,
   CheckCircle2,
@@ -124,6 +125,8 @@ export default function AdminPage() {
   const [ingestionMode, setIngestionMode] = useState<'ocr' | 'upload' | 'online'>('ocr');
   const [candidates, setCandidates] = useState<ExamCandidateItem[]>([]);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
+  const [onlineCatalog, setOnlineCatalog] = useState<OnlineCatalogItem[]>([]);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
   const [remoteUrlInput, setRemoteUrlInput] = useState('');
   const [isFetchingRemoteUrl, setIsFetchingRemoteUrl] = useState(false);
   const [isAutoFetchingOnline, setIsAutoFetchingOnline] = useState(false);
