@@ -76,7 +76,8 @@ export function ExamOcrPanel({
     language: 'vie',
     twoColumnSplit: false,
     skipNativeTextPages: true,
-    enhanceContrast: true
+    enhanceContrast: true,
+    suppressRedInk: true
   });
   const [progress, setProgress] = useState<OcrProgressInfo>({
     status: 'idle',
@@ -475,7 +476,7 @@ export function ExamOcrPanel({
         canvas = await renderPdfPageToCanvas(pdfDocRef.current, page.pageNumber, 1.8);
       } else if (page.file) {
         const img = await loadImageFromFile(page.file);
-        canvas = prepareCanvasForOcr(img, page.rotation, config.enhanceContrast);
+        canvas = prepareCanvasForOcr(img, page.rotation, config.enhanceContrast, config.suppressRedInk);
       }
 
       if (!canvas) {
@@ -483,7 +484,7 @@ export function ExamOcrPanel({
       }
 
       if (page.rotation !== 0 && page.sourceType === 'pdf_page') {
-        const rotatedCanvas = prepareCanvasForOcr(canvas, page.rotation, config.enhanceContrast);
+        const rotatedCanvas = prepareCanvasForOcr(canvas, page.rotation, config.enhanceContrast, config.suppressRedInk);
         releaseCanvas(canvas);
         canvas = rotatedCanvas;
       }
@@ -620,7 +621,7 @@ export function ExamOcrPanel({
             canvas = await renderPdfPageToCanvas(pdfDocRef.current, page.pageNumber, 1.8);
           } else if (page.file) {
             const img = await loadImageFromFile(page.file);
-            canvas = prepareCanvasForOcr(img, page.rotation, config.enhanceContrast);
+            canvas = prepareCanvasForOcr(img, page.rotation, config.enhanceContrast, config.suppressRedInk);
           }
 
           if (!canvas) {
@@ -628,7 +629,7 @@ export function ExamOcrPanel({
           }
 
           if (page.rotation !== 0 && page.sourceType === 'pdf_page') {
-            const rotatedCanvas = prepareCanvasForOcr(canvas, page.rotation, config.enhanceContrast);
+            const rotatedCanvas = prepareCanvasForOcr(canvas, page.rotation, config.enhanceContrast, config.suppressRedInk);
             releaseCanvas(canvas);
             canvas = rotatedCanvas;
           }
@@ -865,7 +866,7 @@ export function ExamOcrPanel({
       </div>
 
       {/* OCR CONFIGURATION TOOLBAR */}
-      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-xs">
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-xs">
         <div>
           <label className="font-semibold text-slate-300 block mb-1.5">Ngôn ngữ nhận dạng</label>
           <select
@@ -910,6 +911,23 @@ export function ExamOcrPanel({
           >
             <Sliders className="w-3.5 h-3.5" />
             <span>{config.enhanceContrast ? 'Khử bóng & đậm mực' : 'Màu gốc'}</span>
+          </button>
+        </div>
+
+        <div>
+          <label className="font-semibold text-slate-300 block mb-1.5">Khử nét bút bi đỏ</label>
+          <button
+            type="button"
+            disabled={isOcrRunning}
+            onClick={() => setConfig(prev => ({ ...prev, suppressRedInk: !prev.suppressRedInk }))}
+            className={`w-full rounded-xl border px-3 py-2 font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
+              config.suppressRedInk
+                ? 'bg-rose-500/20 border-rose-400 text-rose-200'
+                : 'bg-slate-950 border-white/10 text-slate-400 hover:text-white'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{config.suppressRedInk ? 'Tẩy vòng khoanh đỏ' : 'Giữ nét mực đỏ'}</span>
           </button>
         </div>
 
@@ -1425,15 +1443,24 @@ export function ExamOcrPanel({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 overflow-y-auto">
-              <div className="aspect-[3/4] bg-slate-950 rounded-2xl border border-white/10 flex items-center justify-center p-2 overflow-hidden">
+              <div className="relative aspect-[3/4] bg-slate-950 rounded-2xl border border-white/10 flex items-center justify-center p-2 overflow-hidden">
                 {pages[activePreviewIndex].previewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={pages[activePreviewIndex].previewUrl}
-                    alt={`Đối chiếu trang ${pages[activePreviewIndex].pageNumber}`}
-                    style={{ transform: `rotate(${pages[activePreviewIndex].rotation}deg)` }}
-                    className="max-h-full max-w-full object-contain"
-                  />
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={pages[activePreviewIndex].previewUrl}
+                      alt={`Đối chiếu trang ${pages[activePreviewIndex].pageNumber}`}
+                      style={{ transform: `rotate(${pages[activePreviewIndex].rotation}deg)` }}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                    {config.twoColumnSplit && (
+                      <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 border-l-2 border-dashed border-rose-500/80 pointer-events-none flex items-center justify-center">
+                        <span className="bg-rose-950/90 border border-rose-500/60 text-rose-300 text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap shadow">
+                          Đường cắt 2 cột
+                        </span>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <p className="text-xs text-slate-500">Không có ảnh</p>
                 )}

@@ -45,12 +45,74 @@ export async function initOcrWorker(options: WorkerInitOptions): Promise<Worker>
 }
 
 /**
- * Xoay hoặc tiền xử lý canvas/ảnh trước khi OCR (nếu cần xoay hoặc khử bóng tối)
+ * Khử nét bút bi đỏ khoanh tròn đáp án hoặc ghi chú trên đề thi
+ */
+export function suppressRedAnnotations(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  try {
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const data = imgData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const maxGb = Math.max(g, b);
+      // Nét mực bút bi đỏ: R > 115, R vượt trội so với max(G,B) >= 1.25 và độ chênh lệch > 25
+      if (r > 115 && r > maxGb * 1.25 && (r - maxGb) > 25) {
+        data[i] = 255;
+        data[i + 1] = 255;
+        data[i + 2] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } catch (err) {
+    console.warn('Bỏ qua khử mực đỏ do giới hạn ngữ cảnh canvas:', err);
+  }
+}
+
+/**
+ * Quét dải trung tâm (Vertical Gutter) để kiểm tra xem có phải bố cục 2 cột độc lập hay không.
+ * Trả về false nếu phát hiện văn bản trải rộng qua dải trung tâm (thân câu hỏi toàn trang).
+ */
+export function detectTwoColumnLayout(canvas: HTMLCanvasElement): boolean {
+  try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx || canvas.width < 600 || canvas.height < 400) return false;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const midX = Math.floor(width / 2);
+    const gutterWidth = Math.max(12, Math.floor(width * 0.04));
+    const startX = midX - Math.floor(gutterWidth / 2);
+
+    const imgData = ctx.getImageData(startX, 0, gutterWidth, height);
+    const data = imgData.data;
+
+    let darkPixelsInCenter = 0;
+    const totalSamplePixels = gutterWidth * height;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (r < 110 && g < 110 && b < 110) {
+        darkPixelsInCenter++;
+      }
+    }
+
+    const darkRatio = darkPixelsInCenter / totalSamplePixels;
+    // Nếu có > 1.2% điểm ảnh tối ở giữa -> có chữ chạy qua -> là đề 1 cột
+    return darkRatio < 0.012;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Xoay hoặc tiền xử lý canvas/ảnh trước khi OCR (nếu cần xoay, khử bóng tối hoặc khử mực đỏ)
  */
 export function prepareCanvasForOcr(
   source: HTMLCanvasElement | HTMLImageElement,
   rotation = 0,
-  enhanceContrast = false
+  enhanceContrast = false,
+  suppressRedInk = false
 ): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   const isRotated90or270 = rotation % 180 !== 0;
@@ -73,6 +135,15 @@ export function prepareCanvasForOcr(
   ctx.rotate((rotation * Math.PI) / 180);
   ctx.drawImage(source, -sourceWidth / 2, -sourceHeight / 2);
   ctx.restore();
+
+  if (enhanceContrast) {
+    ctx.filter = 'none';
+  }
+
+  // Khử nét bút bi đỏ nếu được bật
+  if (suppressRedInk && canvas.width > 0 && canvas.height > 0) {
+    suppressRedAnnotations(ctx, canvas.width, canvas.height);
+  }
 
   return canvas;
 }
@@ -124,21 +195,25 @@ export async function recognizePage(
   twoColumnSplit = false
 ): Promise<RecognizeResult> {
   if (twoColumnSplit && canvas.width > 600) {
-    const [leftCanvas, rightCanvas] = splitCanvasTwoColumns(canvas);
-    try {
-      const leftRes = await worker.recognize(leftCanvas);
-      const rightRes = await worker.recognize(rightCanvas);
+    // Kiểm tra an toàn: nếu phát hiện chữ chạy ngang giữa trang, ưu tiên OCR toàn trang để tránh xé nát câu hỏi
+    const hasGutter = detectTwoColumnLayout(canvas);
+    if (hasGutter) {
+      const [leftCanvas, rightCanvas] = splitCanvasTwoColumns(canvas);
+      try {
+        const leftRes = await worker.recognize(leftCanvas);
+        const rightRes = await worker.recognize(rightCanvas);
 
-      const combinedText = `${leftRes.data.text.trim()}\n\n${rightRes.data.text.trim()}`.trim();
-      const avgConfidence = Math.round((leftRes.data.confidence + rightRes.data.confidence) / 2);
+        const combinedText = `${leftRes.data.text.trim()}\n\n${rightRes.data.text.trim()}`.trim();
+        const avgConfidence = Math.round((leftRes.data.confidence + rightRes.data.confidence) / 2);
 
-      return {
-        text: combinedText,
-        confidence: avgConfidence
-      };
-    } finally {
-      releaseCanvas(leftCanvas);
-      releaseCanvas(rightCanvas);
+        return {
+          text: combinedText,
+          confidence: avgConfidence
+        };
+      } finally {
+        releaseCanvas(leftCanvas);
+        releaseCanvas(rightCanvas);
+      }
     }
   }
 

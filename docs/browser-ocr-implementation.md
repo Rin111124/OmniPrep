@@ -199,3 +199,54 @@ Chuẩn bị tập ảnh/PDF có ground truth do giáo viên xác nhận, gồm 
 ## 11. Điều không nên kỳ vọng
 
 OCR trình duyệt giúp giảm tải Render và tránh gửi ảnh lên Gemini Vision, nhưng không mặc định chính xác hơn Vision trên bảng/biểu đồ/layout phức tạp. Nó cũng không tự cấu trúc đề hay đảm bảo đáp án. Kết quả nên xem là bản chép có thể sửa; validator và reviewer vẫn cần thiết.
+
+## 12. Rà soát ảnh đề chụp thực tế
+
+### Phạm vi và giới hạn
+
+Ngày rà soát: 22/10/2026. Đầu vào là ảnh một trang bài Địa lý, mục “Bài 7: Dân số Việt Nam”, nhìn thấy các câu 1–15. Ảnh được gửi trong cuộc trò chuyện; file gốc chưa được lưu trong repository.
+
+Đây là **đánh giá trực quan đầu vào và rà soát mã OCR hiện tại**, chưa phải kết quả chạy Tesseract trên ảnh. Ảnh đính kèm chỉ hiển thị trong cuộc trò chuyện; phiên làm việc này không có file ảnh cục bộ hoặc trình duyệt đang chạy ứng dụng để nạp vào `ExamOcrPanel`. Vì vậy không có OCR text, confidence hay CER/WER nào được đo. Không dùng nhận xét dưới đây để kết luận độ chính xác của Tesseract.
+
+### Quan sát ảnh
+
+- Ảnh chụp gần trọn trang, nhưng mặt giấy nghiêng/perspective; các dòng không hoàn toàn nằm ngang.
+- Ánh sáng không đều: góc trên trái và phần dưới tối hơn; nền giấy có texture.
+- Chữ in tương đối nhỏ, serif, tiếng Việt có nhiều dấu.
+- Có nét khoanh đáp án và tô màu đỏ đè lên một số chữ. Đây là annotation trên đề, không nên biến thành nội dung hoặc được dùng để suy luận đáp án.
+- Cách dàn trang là **thân câu hỏi toàn chiều ngang với lựa chọn A/C và B/D đặt cạnh nhau ở nhiều câu**. Đây không phải hai cột văn bản độc lập kéo dài theo trang.
+- Trang có các nhãn Câu 1 đến Câu 15 nhìn thấy được; phần nội dung sau lựa chọn của Câu 15 bị sát mép dưới ảnh.
+
+### Đối chiếu với implementation hiện tại
+
+- `image-ocr.ts` gọi Tesseract.js với ngôn ngữ `vie` mặc định; có thể chọn `vie+eng`.
+- `prepareCanvasForOcr` hiện chỉ áp dụng `contrast(1.25) brightness(1.05)` khi bật enhance contrast. Nó chưa hiệu chỉnh perspective, khử bóng cục bộ hoặc deskew theo góc nhỏ.
+- Chế độ chia hai cột cắt trang tại đúng trung điểm canvas rồi OCR lần lượt nửa trái và nửa phải. Với bố cục ảnh này, cách cắt đó có nguy cơ gom thân câu/đáp án theo vùng thay vì theo từng câu và làm sai thứ tự đọc. Nên để chế độ một vùng cho ca này.
+- `analyzeQuestionContinuity` có thể phát hiện số câu thiếu/lặp khi OCR giữ được dạng nhãn `Câu N:`. Đây là cảnh báo cấu trúc hữu ích nhưng không đo độ chính xác chữ, lựa chọn A–D hay quan hệ giữa dấu khoanh và đáp án.
+- `confidence` của Tesseract là điểm ở cấp kết quả trang/crop, không đủ làm tiêu chí duyệt tự động. Một trang có điểm cao vẫn có thể sai một chữ số, dấu tiếng Việt hoặc đáp án.
+
+### Kết luận và ưu tiên cải thiện
+
+Đây là ca tốt để đánh giá **ảnh chụp thực tế khó vừa phải**, đặc biệt là thứ tự đọc, khả năng nhận dấu tiếng Việt và nhiễu do nét khoanh. Bản OCR cần được xem là bản nháp để người duyệt so với ảnh. Không nên tự nhận dạng đáp án từ các vòng tròn đỏ/đen; tác vụ OCR chỉ chép phần in và giữ nguyên lựa chọn, còn đáp án chuẩn phải được nhập/xác nhận riêng.
+
+1. Bổ sung bước căn thẳng/hiệu chỉnh perspective bằng bốn góc trang (tự động có nút xem trước; cho phép kéo góc thủ công khi phát hiện sai).
+2. Thêm tiền xử lý có thể bật/tắt và so sánh cạnh nhau: cân bằng sáng cục bộ/khử bóng, deskew, grayscale/adaptive threshold. Giữ ảnh gốc để đối chiếu; không ghi đè nguồn.
+3. Giữ OCR toàn trang làm mặc định cho dạng trang này. Chỉ chia/crop theo cột khi người dùng xác nhận vùng cột phù hợp; tốt hơn là crop từng câu hoặc từng vùng đọc sau bước layout detection.
+4. Hiển thị ảnh gốc và text theo vùng/dòng; đánh dấu vùng confidence thấp và cho OCR lại crop đó, thay vì chỉ báo confidence tổng trang.
+5. Cải thiện kiểm tra cấu trúc theo `Câu 1…N` và lựa chọn `A/B/C/D`; cảnh báo thiếu hoặc trùng, nhưng không tự sửa nội dung và không tự chấm đáp án.
+
+### Quy trình chạy lại để lấy số đo thật
+
+1. Lưu ảnh gốc này thành file và nạp vào Admin → OCR trên thiết bị.
+2. Chạy một lần với `vie`, chế độ một vùng, enhance contrast bật; lưu text kết quả nguyên trạng và confidence. Không dùng “Ép OCR ảnh” nếu đầu vào là ảnh.
+3. Đối chiếu từng dòng với ảnh gốc, ghi riêng lỗi dấu/chữ, số câu, thứ tự dòng, nhãn A–D và phần bị nét khoanh che. Không tính nét khoanh thành đáp án.
+4. Chạy lại cùng ảnh sau từng biến đổi (deskew/perspective, cân bằng sáng, threshold) để biết biến đổi nào giúp hoặc làm giảm chất lượng.
+5. Lập ground truth do người đọc xác nhận. Báo CER/WER trên phần chữ in, question coverage, tỷ lệ nhãn/lựa chọn đọc đúng, thời gian xử lý và số vùng cần sửa. Không gộp độ chính xác nội dung câu hỏi với độ chính xác đáp án.
+6. Lưu ảnh test và ground truth trong bộ dữ liệu nội bộ có quyền sử dụng rõ ràng; không commit đề có bản quyền nếu chưa được phép.
+
+### Tiêu chí chấp nhận đề xuất
+
+- Thứ tự câu và thứ tự lựa chọn được giữ đúng; mọi câu thiếu/lặp đều được cảnh báo.
+- Không có đáp án nào được tạo ra từ dấu khoanh hoặc suy đoán OCR.
+- Người duyệt có thể đối chiếu ảnh gốc với nội dung đã nhận dạng và chỉnh sửa trước khi gửi ingest.
+- Ghi số đo trên nhiều ảnh, không kết luận từ riêng ca này. Ngưỡng CER/WER và coverage cần được thống nhất trước khi dùng để nhập đề hàng loạt.

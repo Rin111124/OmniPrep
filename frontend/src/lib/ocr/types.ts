@@ -40,6 +40,7 @@ export interface OcrSessionConfig {
   twoColumnSplit: boolean;
   skipNativeTextPages: boolean;
   enhanceContrast: boolean;
+  suppressRedInk: boolean;
 }
 
 export const OCR_LIMITS = {

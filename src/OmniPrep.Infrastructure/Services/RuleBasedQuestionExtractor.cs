@@ -16,15 +16,19 @@ public static class RuleBasedQuestionExtractor
         RegexOptions.Multiline | RegexOptions.Compiled);
 
     private static readonly Regex QuestionSplitRegex = new(
-        @"(?:^|\n)(?:Câu|CÂU)\s+(\d+)[\:\.]\s*",
+        @"(?:^|\n)(?:Câu|CÂU|Cau|CAU)\s+(\d+)[\:\.]\s*",
         RegexOptions.Multiline | RegexOptions.Compiled);
 
     private static readonly Regex OptionRegex = new(
-        @"(?:^|\n)\s*([A-D])\.\s*(.+?)(?=(?:\n\s*[A-D]\.|\n\s*(?:Câu|CÂU)\s+\d+|$))",
+        @"(?:^|\n|\s{2,}|\t|(?<=[.;!?])\s+)\s*([A-D])[\.\:]\s*(.+?)(?=(?:\s{2,}[A-D][\.\:]|\s+(?:[B-D])[\.\:]|\n\s*[A-D][\.\:]|\n\s*(?:Câu|CÂU|Cau|CAU)\s+\d+|$))",
         RegexOptions.Singleline | RegexOptions.Compiled);
 
+    private static readonly Regex InlineOptionSplitter = new(
+        @"(?:\s{2,}|\t|(?<=[.;!?])\s+|\n)\s*([A-D])[\.\:]\s*",
+        RegexOptions.Compiled);
+
     private static readonly Regex StatementRegex = new(
-        @"(?:^|\n)\s*([a-d])\)\s*(.+?)(?=(?:\n\s*[a-d]\)|\n\s*(?:Câu|CÂU)\s+\d+|$))",
+        @"(?:^|\n)\s*([a-d])\)\s*(.+?)(?=(?:\n\s*[a-d]\)|\n\s*(?:Câu|CÂU|Cau|CAU)\s+\d+|$))",
         RegexOptions.Singleline | RegexOptions.Compiled);
 
     private static readonly Regex PageMarkerRegex = new(
@@ -101,15 +105,19 @@ public static class RuleBasedQuestionExtractor
                 options[optKey] = optVal;
             }
 
+            // Tự động khôi phục các phương án inline nếu bị dính vào nhau
+            RecoverInlineOptions(options);
+
             string content;
-            var firstOptIdx = qText.IndexOf("A.", StringComparison.Ordinal);
-            if (firstOptIdx > 0)
+            var firstOptMatch = Regex.Match(qText, @"(?:^|\n|\s{2,}|\t)\s*A[\.\:]\s*");
+            if (firstOptMatch.Success && firstOptMatch.Index > 0)
             {
-                content = qText.Substring(0, firstOptIdx).Trim();
+                content = qText.Substring(0, firstOptMatch.Index).Trim();
             }
             else
             {
-                content = qText.Trim();
+                var firstOptIdx = qText.IndexOf("A.", StringComparison.Ordinal);
+                content = (firstOptIdx > 0) ? qText.Substring(0, firstOptIdx).Trim() : qText.Trim();
             }
 
             if (content.Length < 5) content = $"Câu {qNum}: {content}";
@@ -135,6 +143,40 @@ public static class RuleBasedQuestionExtractor
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Tự động bóc tách các phương án B, C, D nếu bị gộp trong chuỗi phương án trước đó
+    /// </summary>
+    private static void RecoverInlineOptions(Dictionary<string, string> options)
+    {
+        var keysToCheck = options.Keys.ToList();
+        foreach (var key in keysToCheck)
+        {
+            var val = options[key];
+            var splits = InlineOptionSplitter.Matches(val);
+            if (splits.Count == 0) continue;
+
+            int lastIdx = 0;
+            string currentKey = key;
+
+            foreach (Match split in splits)
+            {
+                var nextKey = split.Groups[1].Value.ToUpperInvariant();
+                if (string.Compare(nextKey, currentKey, StringComparison.Ordinal) > 0 && !options.ContainsKey(nextKey))
+                {
+                    var seg = val.Substring(lastIdx, split.Index - lastIdx).Trim();
+                    options[currentKey] = seg;
+                    currentKey = nextKey;
+                    lastIdx = split.Index + split.Length;
+                }
+            }
+
+            if (currentKey != key && lastIdx < val.Length)
+            {
+                options[currentKey] = val.Substring(lastIdx).Trim();
+            }
+        }
     }
 
     private static List<ExtractedQuestion> ExtractPart2(string text, string defaultTopic)
