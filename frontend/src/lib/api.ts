@@ -21,6 +21,7 @@ import {
   ExamSource,
   SubjectSourceScanResult,
   OnlineCatalogItem,
+  ExamCandidateItem,
 } from '@/types';
 
 const API_BASE = '/api/backend';
@@ -256,6 +257,19 @@ export async function scanExamSourcesBySubject(subjectCode: SubjectCode): Promis
 export async function getOnlineExamCatalog(subjectCode?: string): Promise<OnlineCatalogItem[]> {
   const param = subjectCode ? `?subjectCode=${encodeURIComponent(backendSubjectCodes[subjectCode as SubjectCode] || subjectCode)}` : '';
   const response = await backendFetch(`/admin/ingest/online-catalog${param}`);
+  return response.json();
+}
+
+export async function getDiscoveryCandidates(subjectCode?: string, year?: number): Promise<ExamCandidateItem[]> {
+  const params = new URLSearchParams();
+  if (subjectCode) {
+    params.set('subjectCode', backendSubjectCodes[subjectCode as SubjectCode] || subjectCode);
+  }
+  if (year) {
+    params.set('year', String(year));
+  }
+  const qs = params.toString();
+  const response = await backendFetch(`/admin/ingest/discovery/candidates${qs ? `?${qs}` : ''}`);
   return response.json();
 }
 

@@ -200,7 +200,7 @@ public static class IngestionEndpoints
         }).WithName("GetOnlineExamCatalog");
 
         /// <summary>
-        /// Tự động tải file đề thi từ URL trực tuyến và bóc tách câu hỏi ngay trên máy chủ
+        /// Tự động tải file đề thi từ URL trực tuyến an toàn và bóc tách câu hỏi (Bảo vệ chống SSRF & stream giới hạn)
         /// </summary>
         ingestion.MapPost("/from-url", async (
             IngestFromUrlRequest req,
@@ -210,68 +210,100 @@ public static class IngestionEndpoints
             ISubjectRepository subjectRepo,
             IIngestionService ingestionService,
             IPdfDocumentExtractor pdfExtractor,
-            IHttpClientFactory httpClientFactory,
+            IExamDocumentFetcher documentFetcher,
             CancellationToken ct) =>
         {
             if (!IsAdmin(user)) return Results.Forbid();
             if (!TryParseSubjectCode(req.SubjectCode, out var code))
                 return Results.BadRequest($"Mã môn học không hợp lệ: {req.SubjectCode}");
 
-            if (string.IsNullOrWhiteSpace(req.RemoteUrl) || !Uri.TryCreate(req.RemoteUrl, UriKind.Absolute, out var uri))
-                return Results.BadRequest("Đường dẫn URL không hợp lệ.");
-
-            if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
-                return Results.BadRequest("Hệ thống chỉ chấp nhận giao thức web https/http.");
-
-            if (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-                return Results.BadRequest("Không được phép truy cập địa chỉ loopback hoặc mạng nội bộ.");
+            if (string.IsNullOrWhiteSpace(req.RemoteUrl))
+                return Results.BadRequest("Đường dẫn URL không được để trống.");
 
             var subject = await subjectRepo.GetByCodeAsync(code, ct);
             if (subject is null) return Results.NotFound($"Môn học không tồn tại: {req.SubjectCode}");
 
-            string contentToProcess;
-            string title = !string.IsNullOrWhiteSpace(req.Title) ? req.Title : Path.GetFileName(uri.LocalPath);
-            if (string.IsNullOrWhiteSpace(title)) title = $"Đề thi trực tuyến từ {uri.Host}";
-
+            FetchedDocumentResult fetched;
             try
             {
-                using var client = httpClientFactory.CreateClient();
-                client.Timeout = TimeSpan.FromSeconds(30);
-                using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
-                response.EnsureSuccessStatusCode();
-
-                var contentType = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? "";
-                var contentLength = response.Content.Headers.ContentLength;
-                if (contentLength > 10 * 1024 * 1024)
-                    return Results.BadRequest("File tải về vượt quá giới hạn 10 MB.");
-
-                var isPdf = contentType.Contains("pdf") || uri.LocalPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
-
-                if (isPdf)
-                {
-                    await using var stream = await response.Content.ReadAsStreamAsync(ct);
-                    contentToProcess = await pdfExtractor.ExtractTextAsync(stream, ct);
-                }
-                else
-                {
-                    contentToProcess = await response.Content.ReadAsStringAsync(ct);
-                }
-
-                if (string.IsNullOrWhiteSpace(contentToProcess))
-                    return Results.BadRequest("Không thể đọc được văn bản đề thi từ đường dẫn đã cung cấp.");
+                fetched = await documentFetcher.FetchDocumentAsync(req.RemoteUrl, maxBytes: 15 * 1024 * 1024, ct);
             }
             catch (Exception ex)
             {
-                return Results.BadRequest($"Lỗi khi tải tài liệu từ mạng: {ex.Message}");
+                return Results.BadRequest($"Không thể tải tài liệu từ mạng (Kiểm tra an toàn thất bại): {ex.Message}");
+            }
+
+            string title = !string.IsNullOrWhiteSpace(req.Title) ? req.Title : fetched.FileName;
+            string contentToProcess;
+
+            if (fetched.DetectedMimeType == "application/pdf")
+            {
+                try
+                {
+                    using var stream = new MemoryStream(fetched.Data);
+                    contentToProcess = await pdfExtractor.ExtractTextAsync(stream, ct);
+                }
+                catch (Exception ex)
+                {
+                    return Results.BadRequest($"Lỗi khi trích xuất text từ file PDF: {ex.Message}");
+                }
+
+                if (string.IsNullOrWhiteSpace(contentToProcess))
+                {
+                    return Results.BadRequest("Tài liệu là PDF dạng scan (không có lớp text). Vui lòng sử dụng tính năng '⚡ OCR Trình duyệt' để nhận dạng hình ảnh trang scan, tránh đưa trang scan rỗng vào bóc tách.");
+                }
+            }
+            else
+            {
+                contentToProcess = Encoding.UTF8.GetString(fetched.Data).Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(contentToProcess))
+            {
+                return Results.BadRequest("Không thể đọc được văn bản đề thi từ đường dẫn đã cung cấp.");
             }
 
             return await ExecuteIngestionPipelineAsync(
-                contentToProcess, title, req.RemoteUrl, code, req.SourceName, req.ExamYear,
+                contentToProcess, title, fetched.FinalUrl, code, req.SourceName, req.ExamYear,
                 subject, db, paperRepo, ingestionService, ct);
         }).WithName("IngestFromUrl");
 
         /// <summary>
-        /// Tự động tìm kiếm đề thi trực tuyến theo môn học, tự tải và bóc tách ngay
+        /// Tìm kiếm danh sách đề thi từ các nguồn giáo dục chính thức được phê duyệt (P1 Discovery)
+        /// </summary>
+        ingestion.MapGet("/discovery/candidates", async (
+            [FromQuery] string? subjectCode,
+            [FromQuery] short? year,
+            ClaimsPrincipal user,
+            OmniPrepDbContext db,
+            IExamDiscoveryProvider discoveryProvider,
+            CancellationToken ct) =>
+        {
+            if (!IsTeacherOrAdmin(user)) return Results.Forbid();
+
+            SubjectCode? code = null;
+            if (!string.IsNullOrWhiteSpace(subjectCode) && TryParseSubjectCode(subjectCode, out var parsedCode))
+            {
+                code = parsedCode;
+            }
+
+            var candidates = await discoveryProvider.DiscoverAsync(code, year, ct);
+
+            var ingestedTitles = await db.ExamPapers.AsNoTracking()
+                .Select(p => p.Title)
+                .ToListAsync(ct);
+            var titleSet = new HashSet<string>(ingestedTitles, StringComparer.OrdinalIgnoreCase);
+
+            var result = candidates.Select(c => c with
+            {
+                IsAlreadyIngested = titleSet.Contains(c.Title)
+            }).ToList();
+
+            return Results.Ok(result);
+        }).WithName("GetDiscoveryCandidates");
+
+        /// <summary>
+        /// Nạp đề thi mẫu chuẩn cấu trúc 2025 tích hợp sẵn trong kho offline (Test nhanh không cần tải mạng)
         /// </summary>
         ingestion.MapPost("/auto-fetch", async (
             AutoFetchOnlineRequest req,

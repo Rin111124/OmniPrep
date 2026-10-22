@@ -282,3 +282,19 @@ export interface OnlineCatalogItem {
   remoteUrl: string;
   isAlreadyIngested: boolean;
 }
+
+export interface ExamCandidateItem {
+  id: string;
+  title: string;
+  subjectCode: string;
+  sourceName: string;
+  examYear: number;
+  documentType: string;
+  sourcePageUrl: string;
+  downloadUrl: string;
+  publishedDate: string;
+  description: string;
+  fileSizeBytes?: number | null;
+  isAlreadyIngested: boolean;
+  curatedReason: string;
+}

@@ -71,5 +71,6 @@ GitHub Actions workflow `.github/workflows/ci.yml` định nghĩa .NET restore/b
 
 - [Lộ trình cải thiện và tiêu chí Go/No-Go](docs/production-readiness-plan.md)
 - [Hướng dẫn triển khai staging/production](docs/deployment-guide.md)
+- [Kế hoạch tìm nguồn và bóc tách đề trực tuyến](docs/online-exam-discovery-plan.md)
 
 Các điểm cần xác nhận trước khi mở beta: health/readiness, Supabase role/RLS, migrations, khôi phục bài thi khi mất mạng, chất lượng câu hỏi/đáp án, backup/restore, quota Gemini, quyền riêng tư và rollback. Endpoint xóa dữ liệu hiện xóa dữ liệu học tập trong ứng dụng nhưng không xóa người dùng Supabase Auth.

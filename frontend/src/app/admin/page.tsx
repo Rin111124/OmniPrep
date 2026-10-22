@@ -19,12 +19,12 @@ import {
   getIngestedPaperDetails,
   IngestedPaper,
   scanExamSourcesBySubject,
-  getOnlineExamCatalog,
+  getDiscoveryCandidates,
   ingestFromRemoteUrl,
   autoFetchOnlineExam
 } from '@/lib/api';
 import { ExamOcrPanel } from '@/components/admin/ExamOcrPanel';
-import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult, OnlineCatalogItem } from '@/types';
+import { IngestionStatusResponse, SubjectCode, SubjectSourceScanResult, ExamCandidateItem } from '@/types';
 import {
   Clock,
   CheckCircle2,
@@ -51,7 +51,9 @@ import {
   ImageIcon,
   Trash2,
   RotateCw,
-  RotateCcw
+  RotateCcw,
+  Calendar,
+  ShieldCheck
 } from 'lucide-react';
 
 const supportedSubjects: Array<{ code: SubjectCode; label: string }> = [
@@ -118,10 +120,10 @@ export default function AdminPage() {
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [sourceNotice, setSourceNotice] = useState<string | null>(null);
 
-  // Online Catalog & Remote URL Ingestion State
+  // Online Discovery & Remote URL Ingestion State
   const [ingestionMode, setIngestionMode] = useState<'ocr' | 'upload' | 'online'>('ocr');
-  const [onlineCatalog, setOnlineCatalog] = useState<OnlineCatalogItem[]>([]);
-  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
+  const [candidates, setCandidates] = useState<ExamCandidateItem[]>([]);
+  const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
   const [remoteUrlInput, setRemoteUrlInput] = useState('');
   const [isFetchingRemoteUrl, setIsFetchingRemoteUrl] = useState(false);
   const [isAutoFetchingOnline, setIsAutoFetchingOnline] = useState(false);
@@ -342,6 +344,44 @@ export default function AdminPage() {
       setIsLoadingCatalog(false);
     }
   }, []);
+
+  const loadDiscoveryCandidates = useCallback(async (code: SubjectCode) => {
+    setIsLoadingCandidates(true);
+    try {
+      const items = await getDiscoveryCandidates(code);
+      setCandidates(items);
+    } catch {
+      // Ignored
+    } finally {
+      setIsLoadingCandidates(false);
+    }
+  }, []);
+
+  const handleIngestCandidate = async (candidate: ExamCandidateItem) => {
+    setIsFetchingRemoteUrl(true);
+    setError('');
+    setResult(null);
+    setSourceNotice(`🌐 Đang tải an toàn từ nguồn chính thức: "${candidate.title}"...`);
+    try {
+      const resp = await ingestFromRemoteUrl({
+        subjectCode,
+        sourceName: candidate.sourceName,
+        remoteUrl: candidate.downloadUrl,
+        title: candidate.title,
+        examYear: candidate.examYear
+      });
+      setResult(resp);
+      setSourceNotice(`✅ Đã tải và bóc tách thành công: ${resp.totalExtracted || 0} câu hỏi từ nguồn "${candidate.sourceName}"!`);
+      void refreshPending();
+      void loadIngestedPapers();
+      void loadDiscoveryCandidates(subjectCode);
+      void loadOnlineCatalog(subjectCode);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Không thể tải và bóc tách đề từ nguồn.');
+    } finally {
+      setIsFetchingRemoteUrl(false);
+    }
+  };
 
   const handleIngestFromRemoteUrl = async () => {
     if (!remoteUrlInput.trim()) {
@@ -947,6 +987,7 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                     onClick={() => {
                       setIngestionMode('online');
                       void loadOnlineCatalog(subjectCode);
+                      void loadDiscoveryCandidates(subjectCode);
                     }}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                       ingestionMode === 'online'
@@ -955,7 +996,7 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                     }`}
                   >
                     <Globe className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
-                    <span>🌐 Kho đề trực tuyến</span>
+                    <span>🌐 Tìm đề & Kho trực tuyến</span>
                   </button>
                 </div>
               </div>
@@ -1010,9 +1051,9 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                 />
               )}
 
-              {/* MODE 1: ONLINE INGESTION (KHÔNG CẦN NẠP FILE) */}
+              {/* MODE 1: ONLINE INGESTION (DISCOVERY & SAMPLE CATALOG) */}
               {ingestionMode === 'online' && (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {/* Subject Selector for Online Repo */}
                   <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
@@ -1021,7 +1062,7 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                       </div>
                       <div>
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Môn học cần tìm & bóc tách đề</span>
-                        <p className="text-[11px] text-slate-400">Chọn môn học để hệ thống tự động lọc đề thi tương ứng từ kho mở</p>
+                        <p className="text-[11px] text-slate-400">Chọn môn học để hệ thống tự động lọc đề thi tương ứng từ kho nguồn</p>
                       </div>
                     </div>
                     <select
@@ -1030,6 +1071,7 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                         const nextSubject = event.target.value as SubjectCode;
                         setSubjectCode(nextSubject);
                         void loadOnlineCatalog(nextSubject);
+                        void loadDiscoveryCandidates(nextSubject);
                       }}
                       className="rounded-xl border border-white/10 bg-slate-950 px-3.5 py-2 text-sm font-bold text-white focus:outline-none focus:border-cyan-500"
                     >
@@ -1037,24 +1079,143 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                     </select>
                   </div>
 
-                  {/* Master 1-Click Online Banner */}
-                  <div className="p-5 rounded-2xl bg-gradient-to-r from-cyan-950/70 via-indigo-950/60 to-purple-950/70 border border-cyan-500/40 shadow-xl space-y-4">
+                  {/* PHẦN 1: TÌM KIẾM ĐỀ TỪ CÁC NGUỒN CHÍNH THỨC ĐƯỢC PHÊ DUYỆT (CURATED DISCOVERY - P1) */}
+                  <div className="p-5 rounded-3xl bg-slate-900/90 border border-cyan-500/30 shadow-xl space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                          <Globe className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                            <span>Nguồn đề trực tuyến đã kiểm định (Curated Discovery)</span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                              {candidates.length} đề thi
+                            </span>
+                          </h4>
+                          <p className="text-xs text-slate-400">
+                            Nguồn chính thức từ Bộ GD&ĐT, các Sở GD&ĐT. Tải an toàn có kiểm tra chống SSRF và stream RAM.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void loadDiscoveryCandidates(subjectCode)}
+                        disabled={isLoadingCandidates}
+                        className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 self-start sm:self-center"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCandidates ? 'animate-spin' : ''}`} />
+                        <span>Quét lại nguồn</span>
+                      </button>
+                    </div>
+
+                    {isLoadingCandidates ? (
+                      <div className="py-8 text-center text-slate-400 text-xs">
+                        <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-cyan-400" />
+                        Đang truy vấn các nguồn giáo dục được phê duyệt...
+                      </div>
+                    ) : candidates.length === 0 ? (
+                      <div className="p-6 text-center text-slate-400 text-xs rounded-2xl border border-white/5 bg-slate-950/60">
+                        Chưa tìm thấy đề thi trực tuyến được cấu hình cho môn này trong danh sách nguồn được phê duyệt.
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {candidates.map(candidate => (
+                          <div
+                            key={candidate.id}
+                            className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                              candidate.isAlreadyIngested
+                                ? 'bg-emerald-950/20 border-emerald-500/30'
+                                : 'bg-slate-950/70 border-white/10 hover:border-cyan-500/40 hover:bg-slate-950'
+                            }`}
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                                    {candidate.documentType}
+                                  </span>
+                                  {candidate.fileSizeBytes && (
+                                    <span className="text-[10px] text-slate-400">
+                                      {(candidate.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                                    <Calendar className="w-3 h-3 text-slate-500" /> {candidate.publishedDate}
+                                  </span>
+                                  {candidate.isAlreadyIngested && (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3" /> Đã có
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <h5 className="text-sm font-bold text-white line-clamp-2">{candidate.title}</h5>
+                              
+                              <p className="text-xs text-slate-300 flex items-center gap-2">
+                                <span>Nguồn: <strong className="text-cyan-300">{candidate.sourceName}</strong></span>
+                                <span>• Năm: <strong className="text-white">{candidate.examYear}</strong></span>
+                              </p>
+
+                              <p className="text-[11px] text-slate-400 italic bg-white/5 p-2 rounded-xl border border-white/5">
+                                💡 {candidate.curatedReason}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+                              <a
+                                href={candidate.sourcePageUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] text-slate-400 hover:text-cyan-300 flex items-center gap-1"
+                                title="Xem trang thông báo gốc của Bộ/Sở GD"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                <span>Trang gốc</span>
+                              </a>
+
+                              <button
+                                type="button"
+                                onClick={() => void handleIngestCandidate(candidate)}
+                                disabled={isFetchingRemoteUrl}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                  candidate.isAlreadyIngested
+                                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                    : 'bg-gradient-to-r from-cyan-600 via-teal-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white shadow-md'
+                                }`}
+                              >
+                                <DownloadCloud className="w-3.5 h-3.5" />
+                                <span>{candidate.isAlreadyIngested ? 'Bóc tách lại' : 'Tải & Bóc tách đề này'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* PHẦN 2: ĐỀ MẪU TÍCH HỢP SẴN (OFFLINE SAMPLE CATALOG) */}
+                  <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/10 space-y-4">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex items-start gap-3.5">
-                        <div className="p-3 rounded-2xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-white shadow-lg shadow-cyan-500/20 shrink-0">
-                          <Globe className="w-6 h-6" />
+                        <div className="p-3 rounded-2xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 shrink-0">
+                          <Layers className="w-6 h-6" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="text-base font-bold text-white">
-                              Tự động tìm kiếm, tải & bóc tách đề trực tuyến
-                            </h3>
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
-                              1 Chạm Không Cần File
+                            <h4 className="text-sm font-bold text-white">
+                              Đề mẫu chuẩn cấu trúc 2025 tích hợp sẵn (Offline Sample)
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold uppercase tracking-wider">
+                              Kho lưu trữ tích hợp
                             </span>
                           </div>
-                          <p className="text-xs text-slate-300 mt-1 max-w-xl">
-                            Hệ thống tự động chọn đề thi mới nhất từ kho đề mở chuẩn 2025 theo môn <strong className="text-cyan-300">{supportedSubjects.find(s => s.code === subjectCode)?.label}</strong>, máy chủ tải trực tiếp và bóc tách cấu trúc 3 phần vào ngân hàng câu hỏi.
+                          <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                            Đề thi mẫu chuẩn 2025 được nhúng sẵn trong hệ thống theo môn <strong className="text-indigo-300">{supportedSubjects.find(s => s.code === subjectCode)?.label}</strong> (dùng để kiểm thử nhanh quy trình bóc tách không cần kết nối mạng).
                           </p>
                         </div>
                       </div>
@@ -1064,24 +1225,51 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                         id="btn-admin-auto-fetch-online"
                         onClick={() => void handleAutoFetchOnline()}
                         disabled={isAutoFetchingOnline || isFetchingRemoteUrl || isSubmitting}
-                        className="shrink-0 px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-black text-xs sm:text-sm shadow-xl shadow-cyan-950/60 flex items-center justify-center gap-2.5 transition-all hover:scale-[1.03] active:scale-[0.98] disabled:opacity-50"
+                        className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs shadow-md border border-white/10 flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
                       >
-                        <Zap className={`w-4 h-4 text-yellow-300 ${isAutoFetchingOnline ? 'animate-spin' : ''}`} />
-                        <span>{isAutoFetchingOnline ? 'Đang tự tìm & bóc tách...' : '⚡ Tự tìm & Bóc tách đề này ngay'}</span>
+                        <Zap className={`w-3.5 h-3.5 text-yellow-300 ${isAutoFetchingOnline ? 'animate-spin' : ''}`} />
+                        <span>{isAutoFetchingOnline ? 'Đang nạp đề mẫu...' : '⚡ Nạp đề mẫu tích hợp này'}</span>
                       </button>
                     </div>
+
+                    {/* Catalog list */}
+                    {onlineCatalog.length > 0 && (
+                      <div className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-white/5">
+                        {onlineCatalog.map(item => (
+                          <div key={item.id} className="p-3 rounded-xl bg-slate-950/60 border border-white/5 flex items-center justify-between gap-3 text-xs">
+                            <div className="truncate">
+                              <p className="font-semibold text-slate-200 truncate">{item.title}</p>
+                              <p className="text-[10px] text-slate-400">{item.sourceName} • {item.examYear}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void handleAutoFetchOnline(item.id)}
+                              disabled={isAutoFetchingOnline}
+                              className="px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-[11px] font-bold shrink-0 border border-indigo-500/30"
+                            >
+                              Nạp đề này
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Remote URL Ingestion */}
-                  <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
-                      <LinkIcon className="w-4 h-4" />
-                      <span>Hoặc tải & bóc tách từ liên kết URL từ xa (PDF / TXT)</span>
+                  {/* PHẦN 3: TẢI & BÓC TÁCH TỪ URL TÙY CHỌN (SAFE URL INGESTION) */}
+                  <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
+                        <LinkIcon className="w-4 h-4" />
+                        <span>Tải từ liên kết URL tùy chọn (PDF / TXT)</span>
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                        <ShieldCheck className="w-3 h-3" /> SafeDocumentFetcher Bảo vệ SSRF
+                      </span>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         type="url"
-                        placeholder="https://example.edu.vn/de-thi-tot-nghiep-thpt-2025.pdf"
+                        placeholder="https://moet.gov.vn/content/tintuc/Documents/De-tham-khao-2025/Dia-li-2025.pdf"
                         value={remoteUrlInput}
                         onChange={e => setRemoteUrlInput(e.target.value)}
                         className="flex-1 rounded-xl border border-white/10 bg-slate-950 px-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
@@ -1091,106 +1279,15 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                         id="btn-admin-ingest-remote-url"
                         onClick={() => void handleIngestFromRemoteUrl()}
                         disabled={isFetchingRemoteUrl || !remoteUrlInput.trim()}
-                        className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all shrink-0"
+                        className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-2 transition-all shrink-0 cursor-pointer"
                       >
                         <DownloadCloud className={`w-4 h-4 ${isFetchingRemoteUrl ? 'animate-spin' : ''}`} />
                         <span>{isFetchingRemoteUrl ? 'Đang tải & bóc tách...' : '⚡ Tải & Bóc tách từ URL'}</span>
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Hỗ trợ link công khai từ Bộ GD&ĐT, các Sở GD, Cổng thông tin thi. Máy chủ OmniPrep sẽ tải ngầm, trích xuất văn bản an toàn và bóc tách tự động.
+                      Cơ chế an ninh: Tự động phân giải DNS chặn địa chỉ IP nội bộ (SSRF), giới hạn dung lượng stream tối đa 15 MB, và xác thực chữ ký tập tin PDF (%PDF-).
                     </p>
-                  </div>
-
-                  {/* Available Online Catalog Grid */}
-                  <div className="space-y-3 pt-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Layers className="w-4 h-4 text-cyan-400" />
-                        <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                          Kho đề trực tuyến mở sẵn có ({onlineCatalog.length} đề môn {supportedSubjects.find(s => s.code === subjectCode)?.label})
-                        </h4>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void loadOnlineCatalog(subjectCode)}
-                        disabled={isLoadingCatalog}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCatalog ? 'animate-spin' : ''}`} />
-                        <span>Làm mới</span>
-                      </button>
-                    </div>
-
-                    {isLoadingCatalog ? (
-                      <div className="py-8 text-center text-slate-400 text-xs">
-                        <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-cyan-400" />
-                        Đang tra cứu kho đề trực tuyến...
-                      </div>
-                    ) : onlineCatalog.length === 0 ? (
-                      <div className="p-6 text-center text-slate-400 text-xs rounded-2xl border border-white/5 bg-slate-900/50">
-                        Kho đề trực tuyến chưa có sẵn đề mẫu lưu trữ cho môn này. Bạn có thể sử dụng nút dán URL trực tiếp ở trên.
-                      </div>
-                    ) : (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {onlineCatalog.map(item => (
-                          <div
-                            key={item.id}
-                            className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
-                              item.isAlreadyIngested
-                                ? 'bg-emerald-950/20 border-emerald-500/30'
-                                : 'bg-slate-900/70 border-white/10 hover:border-cyan-500/40 hover:bg-slate-900'
-                            }`}
-                          >
-                            <div className="space-y-1.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                                  {item.documentType}
-                                </span>
-                                {item.isAlreadyIngested && (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3" /> Đã bóc tách
-                                  </span>
-                                )}
-                              </div>
-                              <h5 className="text-sm font-bold text-white line-clamp-2">{item.title}</h5>
-                              <p className="text-xs text-slate-400 flex items-center gap-2">
-                                <span>Nguồn: <strong className="text-slate-300">{item.sourceName}</strong></span>
-                                <span>• Năm: <strong className="text-slate-300">{item.examYear}</strong></span>
-                                <span>• Quy mô: <strong className="text-cyan-300">{item.totalQuestionsEstimated} câu</strong></span>
-                              </p>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
-                              <a
-                                href={item.remoteUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] text-slate-400 hover:text-cyan-300 flex items-center gap-1"
-                                title="Xem trước nguồn đề gốc"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                                <span>Link nguồn</span>
-                              </a>
-
-                              <button
-                                type="button"
-                                onClick={() => void handleAutoFetchOnline(item.id)}
-                                disabled={isAutoFetchingOnline}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                                  item.isAlreadyIngested
-                                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                                    : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white shadow-md'
-                                }`}
-                              >
-                                <Zap className="w-3.5 h-3.5 text-yellow-300" />
-                                <span>{item.isAlreadyIngested ? 'Bóc tách lại' : 'Tải & Bóc tách đề này'}</span>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               )}

@@ -105,6 +105,8 @@ public static class InfrastructureServiceExtensions
         // =====================================================
         services.AddSingleton<IQuestionValidator, OmniPrep.Infrastructure.Validation.QuestionValidator>();
         services.AddSingleton<IPdfDocumentExtractor, PdfDocumentExtractor>();
+        services.AddSingleton<IExamDocumentFetcher, SafeDocumentFetcher>();
+        services.AddSingleton<IExamDiscoveryProvider, CuratedSourcesDiscoveryProvider>();
         services.AddScoped<IIngestionService, IngestionService>();
         services.AddScoped<IGradingService, GradingService>();
         services.AddScoped<IExamGenerationService, ExamGenerationService>();
