@@ -94,7 +94,7 @@ public static class MistakesEndpoints
                 logger.LogError(ex, "Failed to load mistakes for user");
                 return Results.Problem(
                     title: "Mistakes load failed",
-                    detail: ex.Message,
+                    detail: "An internal error occurred while loading mistakes.",
                     statusCode: StatusCodes.Status500InternalServerError);
             }
         }).WithName("GetMistakes");
@@ -169,7 +169,7 @@ public static class MistakesEndpoints
                 logger.LogError(ex, "Failed to sync mistakes");
                 return Results.Problem(
                     title: "Sync mistakes failed",
-                    detail: ex.Message,
+                    detail: "An internal error occurred while syncing mistakes.",
                     statusCode: StatusCodes.Status500InternalServerError);
             }
         }).WithName("SyncMistakes");

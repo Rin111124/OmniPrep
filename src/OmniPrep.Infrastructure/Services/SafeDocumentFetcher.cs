@@ -47,14 +47,56 @@ public sealed class SafeDocumentFetcher : IExamDocumentFetcher
         {
             var uri = ValidateAndNormalizeUri(currentUrl);
 
-            // Kiểm tra phân giải DNS và chặn mọi IP mạng nội bộ / private / loopback
+            // Kiểm tra phân giải DNS sơ bộ trước khi kết nối
             await ValidateDnsAddressesAsync(uri.Host, ct);
 
             using var handler = new SocketsHttpHandler
             {
                 AllowAutoRedirect = false, // Tự xử lý redirect để kiểm tra an ninh từng chặng
                 ConnectTimeout = TimeSpan.FromSeconds(10),
-                PooledConnectionLifetime = TimeSpan.FromMinutes(1)
+                PooledConnectionLifetime = TimeSpan.FromMinutes(1),
+                // Triệt tiêu nguy cơ DNS Rebinding (TOCTOU): Kiểm tra IP trực tiếp tại lúc mở Socket TCP
+                ConnectCallback = async (context, cancellationToken) =>
+                {
+                    var host = context.DnsEndPoint.Host;
+                    var port = context.DnsEndPoint.Port;
+
+                    IPAddress[] addresses;
+                    if (IPAddress.TryParse(host, out var directIp))
+                    {
+                        addresses = [directIp];
+                    }
+                    else
+                    {
+                        addresses = await Dns.GetHostAddressesAsync(host, cancellationToken);
+                    }
+
+                    if (addresses.Length == 0)
+                    {
+                        throw new InvalidOperationException($"Không tìm thấy địa chỉ IP cho máy chủ '{host}'.");
+                    }
+
+                    foreach (var ip in addresses)
+                    {
+                        if (IsPrivateOrRestrictedIp(ip))
+                        {
+                            throw new InvalidOperationException($"Địa chỉ IP '{ip}' của máy chủ '{host}' bị chặn vì thuộc mạng nội bộ hoặc dải cấm (SSRF Protection).");
+                        }
+                    }
+
+                    var targetIp = addresses[0];
+                    var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                    try
+                    {
+                        await socket.ConnectAsync(targetIp, port, cancellationToken);
+                        return new NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
+                }
             };
 
             using var client = new HttpClient(handler)
@@ -146,16 +188,21 @@ public sealed class SafeDocumentFetcher : IExamDocumentFetcher
     }
 
     /// <summary>
-    /// Kiểm tra tính hợp lệ và chuẩn hóa URI đầu vào
+    /// Kiểm tra tính hợp lệ và chuẩn hóa URI đầu vào (Chỉ chấp nhận HTTPS và port bảo mật hợp lệ)
     /// </summary>
-    public static Uri ValidateAndNormalizeUri(string rawUrl)
+    public static Uri ValidateAndNormalizeUri(string rawUrl, bool requireHttps = true)
     {
         if (string.IsNullOrWhiteSpace(rawUrl) || !Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))
         {
             throw new ArgumentException("Đường dẫn URL không hợp lệ.");
         }
 
-        if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+        if (requireHttps && uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new ArgumentException("Hệ thống chỉ chấp nhận giao thức bảo mật HTTPS.");
+        }
+
+        if (!requireHttps && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
         {
             throw new ArgumentException("Hệ thống chỉ chấp nhận giao thức web HTTPS hoặc HTTP.");
         }
@@ -172,9 +219,19 @@ public sealed class SafeDocumentFetcher : IExamDocumentFetcher
         }
 
         // Chỉ cho phép các port web chuẩn
-        if (uri.Port != -1 && uri.Port != 80 && uri.Port != 443 && uri.Port != 8080 && uri.Port != 8443)
+        if (requireHttps)
         {
-            throw new ArgumentException($"Cổng kết nối {uri.Port} không nằm trong danh sách được phép.");
+            if (uri.Port != -1 && uri.Port != 443 && uri.Port != 8443)
+            {
+                throw new ArgumentException($"Cổng kết nối {uri.Port} không nằm trong danh sách HTTPS được phép (chỉ cho phép cổng 443 hoặc 8443).");
+            }
+        }
+        else
+        {
+            if (uri.Port != -1 && uri.Port != 80 && uri.Port != 443 && uri.Port != 8080 && uri.Port != 8443)
+            {
+                throw new ArgumentException($"Cổng kết nối {uri.Port} không nằm trong danh sách được phép.");
+            }
         }
 
         return uri;
@@ -241,6 +298,9 @@ public sealed class SafeDocumentFetcher : IExamDocumentFetcher
             // 10.0.0.0/8 (Private Network)
             if (b0 == 10) return true;
 
+            // 100.64.0.0/10 (Carrier-Grade NAT RFC 6598: 100.64.0.0 - 100.127.255.255)
+            if (b0 == 100 && (b1 >= 64 && b1 <= 127)) return true;
+
             // 127.0.0.0/8 (Loopback)
             if (b0 == 127) return true;
 
@@ -250,8 +310,14 @@ public sealed class SafeDocumentFetcher : IExamDocumentFetcher
             // 172.16.0.0/12 (Private Network: 172.16.x.x -> 172.31.x.x)
             if (b0 == 172 && (b1 >= 16 && b1 <= 31)) return true;
 
+            // 192.0.0.0/24 (IETF Protocol Assignments)
+            if (b0 == 192 && b1 == 0 && bytes[2] == 0) return true;
+
             // 192.168.0.0/16 (Private Network)
             if (b0 == 192 && b1 == 168) return true;
+
+            // 198.18.0.0/15 (Network Benchmark RFC 2544)
+            if (b0 == 198 && (b1 == 18 || b1 == 19)) return true;
 
             // 224.0.0.0/4 (Multicast)
             if (b0 >= 224 && b0 <= 239) return true;
@@ -280,6 +346,9 @@ public sealed class SafeDocumentFetcher : IExamDocumentFetcher
             var bytes = ip.GetAddressBytes();
             // fc00::/7 (Unique Local Address - ULA)
             if ((bytes[0] & 0xFE) == 0xFC) return true;
+
+            // 2001:db8::/32 (Documentation IPv6)
+            if (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8) return true;
 
             return false;
         }

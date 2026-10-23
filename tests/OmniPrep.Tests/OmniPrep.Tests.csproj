@@ -18,6 +18,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="xunit.runner.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\OmniPrep.Domain\OmniPrep.Domain.csproj" />
     <ProjectReference Include="..\..\src\OmniPrep.Application\OmniPrep.Application.csproj" />
     <ProjectReference Include="..\..\src\OmniPrep.Infrastructure\OmniPrep.Infrastructure.csproj" />

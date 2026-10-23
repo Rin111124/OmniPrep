@@ -211,6 +211,7 @@ public static class IngestionEndpoints
             IIngestionService ingestionService,
             IPdfDocumentExtractor pdfExtractor,
             IExamDocumentFetcher documentFetcher,
+            HttpContext httpContext,
             CancellationToken ct) =>
         {
             if (!IsAdmin(user)) return Results.Forbid();
@@ -228,9 +229,19 @@ public static class IngestionEndpoints
             {
                 fetched = await documentFetcher.FetchDocumentAsync(req.RemoteUrl, maxBytes: 15 * 1024 * 1024, ct);
             }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest($"Địa chỉ URL không hợp lệ: {ex.Message}");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest($"Kiểm tra an toàn thất bại: {ex.Message}");
+            }
             catch (Exception ex)
             {
-                return Results.BadRequest($"Không thể tải tài liệu từ mạng (Kiểm tra an toàn thất bại): {ex.Message}");
+                var logger = httpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("IngestionEndpoints");
+                logger.LogError(ex, "Lỗi kết nối khi tải tài liệu từ mạng: {RemoteUrl}", req.RemoteUrl);
+                return Results.BadRequest("Không thể tải tài liệu từ mạng. Vui lòng kiểm tra lại URL hoặc thử lại sau.");
             }
 
             string title = !string.IsNullOrWhiteSpace(req.Title) ? req.Title : fetched.FileName;
@@ -245,7 +256,9 @@ public static class IngestionEndpoints
                 }
                 catch (Exception ex)
                 {
-                    return Results.BadRequest($"Lỗi khi trích xuất text từ file PDF: {ex.Message}");
+                    var logger = httpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("IngestionEndpoints");
+                    logger.LogError(ex, "Lỗi khi trích xuất text từ file PDF: {FileName}", fetched.FileName);
+                    return Results.BadRequest("Không thể trích xuất nội dung văn bản từ file PDF đã tải về.");
                 }
 
                 if (string.IsNullOrWhiteSpace(contentToProcess))
@@ -504,14 +517,14 @@ public static class IngestionEndpoints
                 ? Results.BadRequest(responseData)
                 : Results.Ok(responseData);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             paper.Status = IngestionStatus.Failed;
             try { await paperRepo.SaveChangesAsync(ct); } catch { /* ignore secondary db fail */ }
             return Results.Json(new
             {
                 title = "Bóc tách đề thi thất bại",
-                message = $"Lỗi trong quá trình bóc tách đề thi: {ex.Message}",
+                message = "Đã xảy ra lỗi trong quá trình bóc tách đề thi. Vui lòng thử lại sau.",
                 status = 500
             }, statusCode: StatusCodes.Status500InternalServerError);
         }
@@ -614,14 +627,14 @@ public static class IngestionEndpoints
                 ? Results.BadRequest(responseData)
                 : Results.Ok(responseData);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             paper.Status = IngestionStatus.Failed;
             try { await paperRepo.SaveChangesAsync(ct); } catch { /* ignore secondary db fail */ }
             return Results.Json(new
             {
                 title = "Bóc tách & giải đề qua hình ảnh thất bại",
-                message = $"Lỗi trong quá trình xử lý hình ảnh qua AI: {ex.Message}",
+                message = "Đã xảy ra lỗi trong quá trình xử lý hình ảnh qua AI. Vui lòng thử lại sau.",
                 status = 500
             }, statusCode: StatusCodes.Status500InternalServerError);
         }

@@ -119,17 +119,31 @@ app.Use(async (context, next) =>
     catch (Exception ex)
     {
         var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("GlobalException");
-        logger.LogError(ex, "Unhandled exception on {Path}", context.Request.Path);
+        var traceId = context.TraceIdentifier;
+        logger.LogError(ex, "Unhandled exception on {Path} (TraceIdentifier: {TraceId})", context.Request.Path, traceId);
         if (!context.Response.HasStarted)
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsJsonAsync(new
+            if (app.Environment.IsDevelopment())
             {
-                error = ex.GetType().FullName,
-                message = ex.Message,
-                stackTrace = app.Environment.IsDevelopment() ? ex.StackTrace : null
-            });
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    error = ex.GetType().FullName,
+                    message = ex.Message,
+                    stackTrace = ex.StackTrace,
+                    traceId
+                });
+            }
+            else
+            {
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    error = "INTERNAL_SERVER_ERROR",
+                    message = "Đã xảy ra lỗi nội bộ từ hệ thống. Vui lòng liên hệ quản trị viên hoặc thử lại sau.",
+                    traceId
+                });
+            }
         }
     }
 });

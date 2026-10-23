@@ -31,15 +31,26 @@ public class SafeDocumentFetcherTests
     // Multicast & Broadcast
     [InlineData("224.0.0.1", true)]
     [InlineData("255.255.255.255", true)]
+    // CGNAT RFC 6598 (100.64.0.0 - 100.127.255.255)
+    [InlineData("100.64.0.1", true)]
+    [InlineData("100.127.255.254", true)]
+    [InlineData("100.63.255.255", false)]
+    [InlineData("100.128.0.1", false)]
+    // IETF & Benchmarking (192.0.0.0/24 & 198.18.0.0/15)
+    [InlineData("192.0.0.1", true)]
+    [InlineData("198.18.0.1", true)]
+    [InlineData("198.19.255.254", true)]
+    [InlineData("198.20.0.1", false)]
     // Public DNS / Web IPs
     [InlineData("8.8.8.8", false)]
     [InlineData("1.1.1.1", false)]
     [InlineData("142.250.190.46", false)]
-    // IPv6 Loopback & Link-local & ULA
+    // IPv6 Loopback & Link-local & ULA & Doc
     [InlineData("::1", true)]
     [InlineData("fe80::1", true)]
     [InlineData("fc00::1", true)]
     [InlineData("fd12:3456:789a::1", true)]
+    [InlineData("2001:db8::1", true)]
     // IPv4-Mapped IPv6
     [InlineData("::ffff:127.0.0.1", true)]
     [InlineData("::ffff:192.168.1.1", true)]
@@ -53,19 +64,22 @@ public class SafeDocumentFetcherTests
 
     [Theory]
     [InlineData("https://moet.gov.vn/de-thi.pdf")]
-    [InlineData("http://hanoi.edu.vn:8080/de-thi.pdf")]
+    [InlineData("https://hanoi.edu.vn:8443/de-thi.pdf")]
     public void ValidateAndNormalizeUri_ValidWebUrls_Succeeds(string url)
     {
         var uri = SafeDocumentFetcher.ValidateAndNormalizeUri(url);
         Assert.NotNull(uri);
-        Assert.True(uri.Scheme == "https" || uri.Scheme == "http");
+        Assert.Equal("https", uri.Scheme);
     }
 
     [Theory]
+    [InlineData("http://hanoi.edu.vn:8080/de-thi.pdf")]     // Plain HTTP rejected by default
+    [InlineData("http://moet.gov.vn/de-thi.pdf")]           // Plain HTTP rejected by default
     [InlineData("ftp://moet.gov.vn/de-thi.pdf")]
     [InlineData("file:///C:/secrets.txt")]
     [InlineData("https://admin:pass@moet.gov.vn/de-thi.pdf")] // User-info forbidden
     [InlineData("https://moet.gov.vn:22/de-thi.pdf")]        // SSH port forbidden
+    [InlineData("https://moet.gov.vn:80/de-thi.pdf")]        // HTTP port 80 on HTTPS forbidden
     [InlineData("https://moet.gov.vn:3306/de-thi.pdf")]      // MySQL port forbidden
     public void ValidateAndNormalizeUri_MaliciousOrInvalidUrls_ThrowsArgumentException(string url)
     {
