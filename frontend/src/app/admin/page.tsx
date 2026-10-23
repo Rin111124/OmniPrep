@@ -1236,7 +1236,12 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                     </div>
 
                     {/* Catalog list */}
-                    {onlineCatalog.length > 0 && (
+                    {isLoadingCatalog ? (
+                      <div className="flex items-center gap-2 pt-2 text-xs text-slate-400">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                        <span>Đang tải danh mục đề thi mẫu...</span>
+                      </div>
+                    ) : onlineCatalog.length > 0 ? (
                       <div className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-white/5">
                         {onlineCatalog.map(item => (
                           <div key={item.id} className="p-3 rounded-xl bg-slate-950/60 border border-white/5 flex items-center justify-between gap-3 text-xs">
@@ -1255,7 +1260,7 @@ async function optimizeImageForUpload(file: File, enhanceContrast = true): Promi
                           </div>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* PHẦN 3: TẢI & BÓC TÁCH TỪ URL TÙY CHỌN (SAFE URL INGESTION) */}
